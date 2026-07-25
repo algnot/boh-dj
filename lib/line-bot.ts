@@ -9,6 +9,7 @@ import {
   controlUrl,
   displayUrl,
   getOrCreateRoomForLineSource,
+  getRoomById,
   getRoomByLineSource,
 } from "@/lib/room-service";
 import { roomReadyFlex, songQueuedFlex } from "@/lib/line-flex";
@@ -97,6 +98,17 @@ function textMessage(text: string): Message {
 async function reply(replyToken: string, messages: Message[]) {
   const client = getMessagingClient();
   await client.replyMessage({ replyToken, messages });
+}
+
+export async function pushRoomText(roomId: string, text: string) {
+  const room = await getRoomById(roomId);
+  if (!room) return false;
+  const client = getMessagingClient();
+  await client.pushMessage({
+    to: room.line_source_id,
+    messages: [textMessage(text)],
+  });
+  return true;
 }
 
 async function handleBohCommand(event: WebhookEvent) {

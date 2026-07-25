@@ -457,6 +457,7 @@ export function RoomProvider({
           return;
         }
 
+        const hadTrack = Boolean(current.current_video_id);
         const now = new Date().toISOString();
         await writeSession({
           current_video_id: null,
@@ -467,11 +468,18 @@ export function RoomProvider({
           playback_updated_at: now,
           duration_ms: 0,
         });
+
+        // Queue ran out with no loop: let the LINE chat know.
+        if (hadTrack && loop === "off") {
+          void fetch(`/api/room/${roomId}/queue-ended`, {
+            method: "POST",
+          }).catch(() => {});
+        }
       } finally {
         advancingRef.current = false;
       }
     },
-    [enqueueVideo, playTrack, writeSession],
+    [enqueueVideo, playTrack, roomId, writeSession],
   );
 
   const pause = useCallback(async () => {
