@@ -28,6 +28,22 @@ import {
   youtubeThumbnailUrl,
 } from "@/lib/youtube";
 
+async function resolveVideoIdClient(urlOrId: string): Promise<string | null> {
+  const direct = extractYoutubeVideoId(urlOrId);
+  if (direct) return direct;
+
+  try {
+    const res = await fetch(
+      `/api/youtube/resolve?q=${encodeURIComponent(urlOrId)}`,
+    );
+    if (!res.ok) return null;
+    const data = (await res.json()) as { videoId?: string };
+    return data.videoId ?? null;
+  } catch {
+    return null;
+  }
+}
+
 const LOOP_ORDER: LoopMode[] = ["all", "one", "off"];
 
 function emptySession(roomId: string): RoomSession {
@@ -663,11 +679,11 @@ export function RoomProvider({
 
   const addToQueue = useCallback(
     async (urlOrId: string) => {
-      const videoId = extractYoutubeVideoId(urlOrId);
-      if (!videoId) return false;
-
       setBusy(true);
       try {
+        const videoId = await resolveVideoIdClient(urlOrId);
+        if (!videoId) return false;
+
         const meta = await fetchYoutubeMeta(videoId);
         if (!sessionRef.current.current_video_id) {
           await playTrack({

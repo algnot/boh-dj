@@ -1,10 +1,20 @@
 const YOUTUBE_ID_RE = /^[a-zA-Z0-9_-]{11}$/;
+const PLAYLIST_ID_RE = /^[a-zA-Z0-9_-]{10,}$/;
 
 export type YoutubeMeta = {
   videoId: string;
   title: string;
   thumbnailUrl: string;
 };
+
+function isYoutubeHost(host: string) {
+  return (
+    host === "youtube.com" ||
+    host === "m.youtube.com" ||
+    host === "music.youtube.com" ||
+    host === "youtu.be"
+  );
+}
 
 export function extractYoutubeVideoId(input: string): string | null {
   const raw = input.trim();
@@ -48,24 +58,142 @@ export function extractYoutubeVideoId(input: string): string | null {
   return null;
 }
 
+export function extractYoutubePlaylistId(input: string): string | null {
+  const raw = input.trim();
+  if (!raw) return null;
+  if (PLAYLIST_ID_RE.test(raw) && raw.startsWith("PL")) return raw;
+
+  try {
+    const url = new URL(raw);
+    const host = url.hostname.replace(/^www\./, "");
+    if (!isYoutubeHost(host) || host === "youtu.be") return null;
+
+    const list = url.searchParams.get("list") ?? "";
+    if (list && PLAYLIST_ID_RE.test(list)) return list;
+
+    const parts = url.pathname.split("/").filter(Boolean);
+    if (parts[0] === "playlist" && parts[1] && PLAYLIST_ID_RE.test(parts[1])) {
+      return parts[1];
+    }
+  } catch {
+    return null;
+  }
+
+  return null;
+}
+
+function firstUrlInText(text: string): string | null {
+  const urlMatch = text.match(
+    /https?:\/\/(?:www\.|m\.|music\.)?(?:youtube\.com\/\S+|youtu\.be\/\S+)/i,
+  );
+  return urlMatch?.[0] ?? null;
+}
+
 /** Find the first YouTube URL / id inside free-form chat text. */
 export function extractYoutubeVideoIdFromText(text: string): string | null {
   const trimmed = text.trim();
   const direct = extractYoutubeVideoId(trimmed);
   if (direct) return direct;
 
-  const urlMatch = trimmed.match(
-    /https?:\/\/(?:www\.|m\.|music\.)?(?:youtube\.com\/\S+|youtu\.be\/\S+)/i,
-  );
-  if (urlMatch?.[0]) {
-    return extractYoutubeVideoId(urlMatch[0]);
-  }
+  const url = firstUrlInText(trimmed);
+  if (url) return extractYoutubeVideoId(url);
 
   return null;
 }
 
+export function extractYoutubePlaylistIdFromText(text: string): string | null {
+  const trimmed = text.trim();
+  const direct = extractYoutubePlaylistId(trimmed);
+  if (direct) return direct;
+
+  const url = firstUrlInText(trimmed);
+  if (url) return extractYoutubePlaylistId(url);
+
+  return null;
+}
+
+/**
+ * Resolve a playable video id from free-form text.
+ * Prefer an explicit video link; otherwise take the first item of a playlist.
+ */
+export async function resolveYoutubeVideoIdFromText(
+  text: string,
+): Promise<string | null> {
+  const videoId = extractYoutubeVideoIdFromText(text);
+  if (videoId) return videoId;
+
+  const playlistId = extractYoutubePlaylistIdFromText(text);
+  if (!playlistId) return null;
+
+  return fetchFirstPlaylistVideoId(playlistId);
+}
+
 export function youtubeThumbnailUrl(videoId: string) {
   return `https://i.ytimg.com/vi/${videoId}/hqdefault.jpg`;
+}
+
+async function fetchFirstPlaylistVideoIdViaApi(
+  playlistId: string,
+): Promise<string | null> {
+  const apiKey = process.env.YOUTUBE_API_KEY?.trim();
+  if (!apiKey) return null;
+
+  try {
+    const url = new URL("https://www.googleapis.com/youtube/v3/playlistItems");
+    url.searchParams.set("part", "contentDetails,snippet");
+    url.searchParams.set("maxResults", "1");
+    url.searchParams.set("playlistId", playlistId);
+    url.searchParams.set("key", apiKey);
+
+    const res = await fetch(url);
+    if (!res.ok) return null;
+    const data = (await res.json()) as {
+      items?: Array<{
+        contentDetails?: { videoId?: string };
+        snippet?: { resourceId?: { videoId?: string } };
+      }>;
+    };
+    const item = data.items?.[0];
+    const id =
+      item?.contentDetails?.videoId ?? item?.snippet?.resourceId?.videoId ?? "";
+    return YOUTUBE_ID_RE.test(id) ? id : null;
+  } catch {
+    return null;
+  }
+}
+
+/** Public Atom feed — no API key required. */
+async function fetchFirstPlaylistVideoIdViaFeed(
+  playlistId: string,
+): Promise<string | null> {
+  try {
+    const res = await fetch(
+      `https://www.youtube.com/feeds/videos.xml?playlist_id=${encodeURIComponent(
+        playlistId,
+      )}`,
+      {
+        headers: { Accept: "application/atom+xml,application/xml,text/xml" },
+        cache: "no-store",
+      },
+    );
+    if (!res.ok) return null;
+    const xml = await res.text();
+    const match =
+      xml.match(/<yt:videoId>([a-zA-Z0-9_-]{11})<\/yt:videoId>/) ??
+      xml.match(/\/watch\?v=([a-zA-Z0-9_-]{11})/);
+    const id = match?.[1] ?? "";
+    return YOUTUBE_ID_RE.test(id) ? id : null;
+  } catch {
+    return null;
+  }
+}
+
+export async function fetchFirstPlaylistVideoId(
+  playlistId: string,
+): Promise<string | null> {
+  const fromApi = await fetchFirstPlaylistVideoIdViaApi(playlistId);
+  if (fromApi) return fromApi;
+  return fetchFirstPlaylistVideoIdViaFeed(playlistId);
 }
 
 export async function fetchYoutubeMeta(videoId: string): Promise<YoutubeMeta> {

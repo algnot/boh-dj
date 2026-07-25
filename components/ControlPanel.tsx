@@ -56,8 +56,7 @@ export function ControlPanel() {
     addToQueue,
   } = useRoom();
 
-  const [showQueue, setShowQueue] = useState(true);
-  const [showActivity, setShowActivity] = useState(true);
+  const [activeTab, setActiveTab] = useState<"queue" | "activity">("queue");
   const [urlInput, setUrlInput] = useState("");
   const [error, setError] = useState("");
   const [seeking, setSeeking] = useState<number | null>(null);
@@ -150,9 +149,6 @@ export function ControlPanel() {
           <h1 className={styles.title}>
             {session.current_title || "ยังไม่มีเพลง"}
           </h1>
-          <p className={styles.hint}>
-            หน้านี้ไม่เล่นเสียง/วิดีโอ — ใช้ควบคุมอย่างเดียว
-          </p>
         </div>
       </section>
 
@@ -233,22 +229,6 @@ export function ControlPanel() {
             <LoopIcon mode={session.loop_mode} />
             {loopLabel(session.loop_mode)}
           </button>
-          <button
-            type="button"
-            className={styles.chip}
-            onClick={() => setShowQueue((v) => !v)}
-          >
-            <ListMusic size={18} strokeWidth={2.2} />
-            คิว {queue.length}
-          </button>
-          <button
-            type="button"
-            className={styles.chip}
-            onClick={() => setShowActivity((v) => !v)}
-          >
-            <Activity size={18} strokeWidth={2.2} />
-            กิจกรรม
-          </button>
         </div>
       </section>
 
@@ -257,7 +237,7 @@ export function ControlPanel() {
           className={styles.addInput}
           value={urlInput}
           onChange={(event) => setUrlInput(event.target.value)}
-          placeholder="วางลิงก์ YouTube เพื่อเพิ่มคิว"
+          placeholder="ลิงก์ YouTube / เพลลิสต์"
           disabled={busy}
         />
         <button type="submit" className={styles.addBtn} disabled={busy}>
@@ -268,7 +248,35 @@ export function ControlPanel() {
         <p className={styles.error}>{error || loadError}</p>
       ) : null}
 
-      {showQueue ? (
+      <div className={styles.tabs} role="tablist" aria-label="ข้อมูลห้อง">
+        <button
+          type="button"
+          role="tab"
+          aria-selected={activeTab === "queue"}
+          className={`${styles.tab} ${
+            activeTab === "queue" ? styles.tabActive : ""
+          }`}
+          onClick={() => setActiveTab("queue")}
+        >
+          <ListMusic size={18} strokeWidth={2.2} />
+          คิวเพลง
+          <span className={styles.tabCount}>{queue.length}</span>
+        </button>
+        <button
+          type="button"
+          role="tab"
+          aria-selected={activeTab === "activity"}
+          className={`${styles.tab} ${
+            activeTab === "activity" ? styles.tabActive : ""
+          }`}
+          onClick={() => setActiveTab("activity")}
+        >
+          <Activity size={18} strokeWidth={2.2} />
+          กิจกรรม
+        </button>
+      </div>
+
+      {activeTab === "queue" ? (
         <section className={styles.queue}>
           <h2 className={styles.queueTitle}>คิวเพลง</h2>
           {queue.length === 0 ? (
@@ -325,7 +333,7 @@ export function ControlPanel() {
         </section>
       ) : null}
 
-      {showActivity ? (
+      {activeTab === "activity" ? (
         <section className={styles.activity}>
           <h2 className={styles.queueTitle}>ประวัติกิจกรรม</h2>
           {events.length === 0 ? (

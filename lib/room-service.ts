@@ -9,8 +9,8 @@ import type {
   RoomSession,
 } from "@/lib/types";
 import {
-  extractYoutubeVideoIdFromText,
   fetchYoutubeMeta,
+  resolveYoutubeVideoIdFromText,
   youtubeThumbnailUrl,
 } from "@/lib/youtube";
 import { logRoomEvent } from "@/lib/room-events";
@@ -303,7 +303,7 @@ export async function addYoutubeFromLineMessage(args: {
   | { ok: true; title: string; mode: "play" | "queue"; thumbnailUrl: string; videoId: string }
   | { ok: false; reason: string }
 > {
-  const videoId = extractYoutubeVideoIdFromText(args.text);
+  const videoId = await resolveYoutubeVideoIdFromText(args.text);
   if (!videoId) {
     return { ok: false, reason: "no_youtube" };
   }
