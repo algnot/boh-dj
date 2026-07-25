@@ -13,6 +13,7 @@ import {
 import { getClientId } from "@/lib/client-id";
 import { logRoomEvent } from "@/lib/room-events";
 import { getSupabase } from "@/lib/supabase/client";
+import { buildLeaderboard } from "@/lib/scores";
 import type {
   Database,
   HistoryTrack,
@@ -21,7 +22,9 @@ import type {
   QueueItem,
   RoomActor,
   RoomEvent,
+  RoomLike,
   RoomSession,
+  ScoreEntry,
 } from "@/lib/types";
 import {
   extractYoutubeVideoId,
@@ -54,6 +57,9 @@ function emptySession(roomId: string): RoomSession {
     current_video_id: null,
     current_title: "",
     current_thumbnail_url: "",
+    current_play_id: "",
+    current_owner_name: "",
+    current_owner_user_id: "",
     playback_state: "paused",
     playback_position_ms: 0,
     playback_updated_at: now,
@@ -63,6 +69,13 @@ function emptySession(roomId: string): RoomSession {
     history: [],
     updated_at: now,
   };
+}
+
+function newPlayId() {
+  if (typeof crypto !== "undefined" && "randomUUID" in crypto) {
+    return crypto.randomUUID();
+  }
+  return `${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
 }
 
 function sortQueue(items: QueueItem[]) {
@@ -76,7 +89,7 @@ function sortQueue(items: QueueItem[]) {
 function parseHistory(raw: unknown): HistoryTrack[] {
   if (!Array.isArray(raw)) return [];
   return raw
-    .map((item) => {
+    .map((item): HistoryTrack | null => {
       if (!item || typeof item !== "object") return null;
       const row = item as Record<string, unknown>;
       if (typeof row.videoId !== "string") return null;
@@ -87,6 +100,9 @@ function parseHistory(raw: unknown): HistoryTrack[] {
           typeof row.thumbnailUrl === "string"
             ? row.thumbnailUrl
             : youtubeThumbnailUrl(row.videoId),
+        ownerName: typeof row.ownerName === "string" ? row.ownerName : "",
+        ownerUserId:
+          typeof row.ownerUserId === "string" ? row.ownerUserId : "",
       };
     })
     .filter((item): item is HistoryTrack => Boolean(item));
@@ -102,6 +118,9 @@ const SESSION_COLUMNS = [
   "current_video_id",
   "current_title",
   "current_thumbnail_url",
+  "current_play_id",
+  "current_owner_name",
+  "current_owner_user_id",
   "playback_state",
   "playback_position_ms",
   "playback_updated_at",
@@ -131,6 +150,13 @@ type RoomContextValue = {
   skipNext: () => Promise<void>;
   playPrevious: () => Promise<void>;
   cycleLoopMode: () => Promise<void>;
+  likes: RoomLike[];
+  currentLikes: RoomLike[];
+  hasLikedCurrent: boolean;
+  canLikeCurrent: boolean;
+  ownsCurrentTrack: boolean;
+  leaderboard: ScoreEntry[];
+  toggleLikeCurrent: () => Promise<void>;
   removeFromQueue: (id: string) => Promise<void>;
   playQueueItem: (id: string) => Promise<void>;
   addToQueue: (urlOrId: string) => Promise<boolean>;
@@ -178,6 +204,7 @@ export function RoomProvider({
   );
   const [queue, setQueue] = useState<QueueItem[]>([]);
   const [events, setEvents] = useState<RoomEvent[]>([]);
+  const [likes, setLikes] = useState<RoomLike[]>([]);
   const [clientId, setClientId] = useState("");
   const [busy, setBusy] = useState(false);
   const [loadError, setLoadError] = useState("");
@@ -320,6 +347,20 @@ export function RoomProvider({
     [rememberOwnWrite, roomId],
   );
 
+  // Fire-and-forget: the API decides whether the play earned any points and
+  // only announces each play once.
+  const announceTrackScore = useCallback(
+    (playId: string) => {
+      if (!playId) return;
+      void fetch(`/api/room/${roomId}/track-score`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ playId }),
+      }).catch(() => {});
+    },
+    [roomId],
+  );
+
   const recordEvent = useCallback(
     async (args: {
       eventType: Parameters<typeof logRoomEvent>[0]["eventType"];
@@ -351,6 +392,7 @@ export function RoomProvider({
       title: string;
       thumbnailUrl: string;
       addedByName?: string;
+      addedByUserId?: string;
     }) => {
       const supabase = getSupabase();
       const maxOrder = queueRef.current.reduce(
@@ -366,6 +408,8 @@ export function RoomProvider({
           title: args.title,
           thumbnail_url: args.thumbnailUrl,
           added_by_name: args.addedByName ?? actorRef.current.name,
+          added_by_user_id:
+            args.addedByUserId ?? actorRef.current.userId ?? "",
           sort_order: maxOrder + 1,
         })
         .select("*")
@@ -385,6 +429,8 @@ export function RoomProvider({
       videoId: string;
       title: string;
       thumbnailUrl: string;
+      ownerName?: string;
+      ownerUserId?: string;
       pushCurrentToHistory?: boolean;
       autoplay?: boolean;
     }) => {
@@ -404,6 +450,8 @@ export function RoomProvider({
             thumbnailUrl:
               current.current_thumbnail_url ||
               youtubeThumbnailUrl(current.current_video_id),
+            ownerName: current.current_owner_name,
+            ownerUserId: current.current_owner_user_id,
           },
         ].slice(-30);
       }
@@ -413,6 +461,9 @@ export function RoomProvider({
         current_video_id: args.videoId,
         current_title: args.title,
         current_thumbnail_url: args.thumbnailUrl,
+        current_play_id: newPlayId(),
+        current_owner_name: args.ownerName ?? "",
+        current_owner_user_id: args.ownerUserId ?? "",
         playback_state: args.autoplay === false ? "paused" : "playing",
         playback_position_ms: 0,
         playback_updated_at: now,
@@ -510,9 +561,12 @@ export function RoomProvider({
               thumbnailUrl:
                 current.current_thumbnail_url ||
                 youtubeThumbnailUrl(current.current_video_id),
-              addedByName: "โบ้",
+              addedByName: current.current_owner_name || "โบ้",
+              addedByUserId: current.current_owner_user_id,
             });
           }
+
+          announceTrackScore(current.current_play_id);
 
           await playTrack({
             videoId: next.youtube_video_id,
@@ -520,6 +574,8 @@ export function RoomProvider({
             thumbnailUrl:
               next.thumbnail_url ||
               youtubeThumbnailUrl(next.youtube_video_id),
+            ownerName: next.added_by_name,
+            ownerUserId: next.added_by_user_id,
           });
 
           const supabase = getSupabase();
@@ -539,11 +595,16 @@ export function RoomProvider({
         }
 
         const hadTrack = Boolean(current.current_video_id);
+        announceTrackScore(current.current_play_id);
+
         const now = new Date().toISOString();
         await writeSession({
           current_video_id: null,
           current_title: "",
           current_thumbnail_url: "",
+          current_play_id: "",
+          current_owner_name: "",
+          current_owner_user_id: "",
           playback_state: "paused",
           playback_position_ms: 0,
           playback_updated_at: now,
@@ -560,7 +621,7 @@ export function RoomProvider({
         advancingRef.current = false;
       }
     },
-    [enqueueVideo, playTrack, roomId, writeSession],
+    [announceTrackScore, enqueueVideo, playTrack, roomId, writeSession],
   );
 
   const pause = useCallback(async () => {
@@ -673,7 +734,8 @@ export function RoomProvider({
             thumbnail_url:
               current.current_thumbnail_url ||
               youtubeThumbnailUrl(current.current_video_id),
-            added_by_name: "โบ้",
+            added_by_name: current.current_owner_name || "โบ้",
+            added_by_user_id: current.current_owner_user_id,
             sort_order: minOrder - 1,
           })
           .select("*")
@@ -689,6 +751,9 @@ export function RoomProvider({
         current_video_id: prev.videoId,
         current_title: prev.title,
         current_thumbnail_url: prev.thumbnailUrl,
+        current_play_id: newPlayId(),
+        current_owner_name: prev.ownerName ?? "",
+        current_owner_user_id: prev.ownerUserId ?? "",
         playback_state: "playing",
         playback_position_ms: 0,
         playback_updated_at: now,
@@ -718,6 +783,109 @@ export function RoomProvider({
       message: `${actorRef.current.name} เปลี่ยนเป็น${label}`,
     });
   }, [recordEvent, writeSession]);
+
+  // One vote per listener per play. Falls back to the browser id so a guest
+  // without a LINE profile still can't stack likes.
+  const likerKey = resolvedActor.userId || clientId;
+
+  const currentLikes = useMemo(() => {
+    if (!session.current_play_id) return [];
+    return likes.filter((like) => like.play_id === session.current_play_id);
+  }, [likes, session.current_play_id]);
+
+  const hasLikedCurrent = useMemo(
+    () =>
+      Boolean(likerKey) &&
+      currentLikes.some((like) => like.liker_key === likerKey),
+    [currentLikes, likerKey],
+  );
+
+  const ownsCurrentTrack = useMemo(() => {
+    if (!session.current_video_id) return false;
+    if (session.current_owner_user_id) {
+      return session.current_owner_user_id === resolvedActor.userId;
+    }
+    return (
+      Boolean(session.current_owner_name) &&
+      session.current_owner_name === resolvedActor.name
+    );
+  }, [
+    resolvedActor.name,
+    resolvedActor.userId,
+    session.current_owner_name,
+    session.current_owner_user_id,
+    session.current_video_id,
+  ]);
+
+  const canLikeCurrent =
+    Boolean(session.current_video_id) &&
+    Boolean(session.current_play_id) &&
+    Boolean(likerKey) &&
+    !ownsCurrentTrack;
+
+  const leaderboard = useMemo<ScoreEntry[]>(
+    () => buildLeaderboard(likes),
+    [likes],
+  );
+
+  const toggleLikeCurrent = useCallback(async () => {
+    const current = sessionRef.current;
+    if (!current.current_video_id || !current.current_play_id) return;
+    if (!likerKey) return;
+
+    // You don't get to cheer for your own request.
+    const isMine = current.current_owner_user_id
+      ? current.current_owner_user_id === actorRef.current.userId
+      : Boolean(current.current_owner_name) &&
+        current.current_owner_name === actorRef.current.name;
+    if (isMine) return;
+
+    const supabase = getSupabase();
+    const existing = likes.find(
+      (like) =>
+        like.play_id === current.current_play_id &&
+        like.liker_key === likerKey,
+    );
+
+    if (existing) {
+      setLikes((prev) => prev.filter((like) => like.id !== existing.id));
+      await supabase.from("room_likes").delete().eq("id", existing.id);
+      return;
+    }
+
+    const { data, error } = await supabase
+      .from("room_likes")
+      .insert({
+        room_id: roomId,
+        play_id: current.current_play_id,
+        video_id: current.current_video_id,
+        track_title: current.current_title || current.current_video_id,
+        owner_name: current.current_owner_name,
+        owner_user_id: current.current_owner_user_id,
+        liker_key: likerKey,
+        liker_name: actorRef.current.name,
+        liker_picture_url: actorRef.current.pictureUrl ?? "",
+      })
+      .select("*")
+      .single();
+
+    // Duplicate likes are rejected by the unique index — nothing to report.
+    if (error || !data) return;
+
+    const row = data as RoomLike;
+    setLikes((prev) =>
+      prev.some((like) => like.id === row.id) ? prev : [row, ...prev],
+    );
+
+    await recordEvent({
+      eventType: "song_liked",
+      message: `${actorRef.current.name} ถูกใจเพลง "${
+        current.current_title || current.current_video_id
+      }"${current.current_owner_name ? ` ของ ${current.current_owner_name}` : ""}`,
+      trackTitle: current.current_title,
+      trackVideoId: current.current_video_id,
+    });
+  }, [likerKey, likes, recordEvent, roomId]);
 
   const removeFromQueue = useCallback(
     async (id: string) => {
@@ -749,6 +917,8 @@ export function RoomProvider({
           title: item.title,
           thumbnailUrl:
             item.thumbnail_url || youtubeThumbnailUrl(item.youtube_video_id),
+          ownerName: item.added_by_name,
+          ownerUserId: item.added_by_user_id,
         });
         const supabase = getSupabase();
         await supabase.from("room_queue").delete().eq("id", id);
@@ -779,6 +949,8 @@ export function RoomProvider({
             videoId: meta.videoId,
             title: meta.title,
             thumbnailUrl: meta.thumbnailUrl,
+            ownerName: actorRef.current.name,
+            ownerUserId: actorRef.current.userId ?? "",
             pushCurrentToHistory: false,
           });
           await recordEvent({
@@ -820,7 +992,7 @@ export function RoomProvider({
     const supabase = getSupabase();
 
     const bootstrap = async () => {
-      const [sessionRes, queueRes, eventsRes] = await Promise.all([
+      const [sessionRes, queueRes, eventsRes, likesRes] = await Promise.all([
         supabase
           .from("room_sessions")
           .select("*")
@@ -838,6 +1010,11 @@ export function RoomProvider({
           .eq("room_id", roomId)
           .order("created_at", { ascending: false })
           .limit(80),
+        supabase
+          .from("room_likes")
+          .select("*")
+          .eq("room_id", roomId)
+          .order("created_at", { ascending: false }),
       ]);
 
       if (cancelled) return;
@@ -872,6 +1049,12 @@ export function RoomProvider({
         setEvents([]);
       } else {
         setEvents((eventsRes.data ?? []) as RoomEvent[]);
+      }
+      if (likesRes.error) {
+        console.warn("room_likes load failed", likesRes.error);
+        setLikes([]);
+      } else {
+        setLikes((likesRes.data ?? []) as RoomLike[]);
       }
     };
 
@@ -958,6 +1141,28 @@ export function RoomProvider({
           });
         },
       )
+      .on(
+        "postgres_changes",
+        {
+          event: "*",
+          schema: "public",
+          table: "room_likes",
+          filter: `room_id=eq.${roomId}`,
+        },
+        (payload) => {
+          if (payload.eventType === "DELETE") {
+            const row = payload.old as { id?: string };
+            if (!row.id) return;
+            setLikes((prev) => prev.filter((like) => like.id !== row.id));
+            return;
+          }
+          const row = payload.new as RoomLike;
+          if (!row?.id) return;
+          setLikes((prev) =>
+            prev.some((like) => like.id === row.id) ? prev : [row, ...prev],
+          );
+        },
+      )
       .subscribe();
 
     return () => {
@@ -987,6 +1192,13 @@ export function RoomProvider({
       skipNext,
       playPrevious,
       cycleLoopMode,
+      likes,
+      currentLikes,
+      hasLikedCurrent,
+      canLikeCurrent,
+      ownsCurrentTrack,
+      leaderboard,
+      toggleLikeCurrent,
       removeFromQueue,
       playQueueItem,
       addToQueue,
@@ -1014,6 +1226,13 @@ export function RoomProvider({
       skipNext,
       playPrevious,
       cycleLoopMode,
+      likes,
+      currentLikes,
+      hasLikedCurrent,
+      canLikeCurrent,
+      ownsCurrentTrack,
+      leaderboard,
+      toggleLikeCurrent,
       removeFromQueue,
       playQueueItem,
       addToQueue,

@@ -157,6 +157,7 @@ async function handleYoutubeLink(event: WebhookEvent) {
     sourceId: source.sourceId,
     text: event.message.text,
     addedByName: displayName,
+    addedByUserId: event.source?.userId ?? "",
   });
 
   if (!result.ok) {

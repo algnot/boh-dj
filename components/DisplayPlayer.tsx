@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
+import { Heart } from "lucide-react";
 import { useRoom } from "@/lib/room-context";
 import {
   loadYoutubeIframeApi,
@@ -69,6 +70,7 @@ export function DisplayPlayer() {
     syncPlayback,
     publishHostClock,
     onLocalVideoEnded,
+    currentLikes,
   } = useRoom();
 
   const [needsUnlock, setNeedsUnlock] = useState(false);
@@ -516,6 +518,17 @@ export function DisplayPlayer() {
           <div className={styles.nowPlaying}>
             <span className={styles.nowLabel}>กำลังเล่น</span>
             <span className={styles.nowTitle}>{session.current_title}</span>
+            {session.current_owner_name ? (
+              <span className={styles.nowOwner}>
+                ขอโดย {session.current_owner_name}
+              </span>
+            ) : null}
+            {currentLikes.length > 0 ? (
+              <span className={styles.nowLikes}>
+                <Heart size={16} strokeWidth={2.4} fill="currentColor" />
+                {currentLikes.length}
+              </span>
+            ) : null}
           </div>
         ) : null}
       </div>

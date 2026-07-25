@@ -124,3 +124,19 @@
   letter-spacing: 0.02em;
   line-height: 1.25;
 }
+
+.nowOwner {
+  font-size: 0.78rem;
+  opacity: 0.6;
+}
+
+.nowLikes {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.3rem;
+  margin-top: 0.25rem;
+  color: #fb7185;
+  font-size: 0.9rem;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+}

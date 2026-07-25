@@ -1,4 +1,4 @@
-import { randomBytes } from "crypto";
+import { randomBytes, randomUUID } from "crypto";
 import { getSupabase } from "@/lib/supabase/client";
 import type {
   Database,
@@ -7,6 +7,7 @@ import type {
   LoopMode,
   QueueItem,
   Room,
+  RoomLike,
   RoomSession,
 } from "@/lib/types";
 import {
@@ -40,6 +41,9 @@ function emptySession(roomId: string): RoomSession {
     current_video_id: null,
     current_title: "",
     current_thumbnail_url: "",
+    current_play_id: "",
+    current_owner_name: "",
+    current_owner_user_id: "",
     playback_state: "paused",
     playback_position_ms: 0,
     playback_updated_at: now,
@@ -54,7 +58,7 @@ function emptySession(roomId: string): RoomSession {
 function parseHistory(raw: unknown): HistoryTrack[] {
   if (!Array.isArray(raw)) return [];
   return raw
-    .map((item) => {
+    .map((item): HistoryTrack | null => {
       if (!item || typeof item !== "object") return null;
       const row = item as Record<string, unknown>;
       if (typeof row.videoId !== "string") return null;
@@ -65,6 +69,9 @@ function parseHistory(raw: unknown): HistoryTrack[] {
           typeof row.thumbnailUrl === "string"
             ? row.thumbnailUrl
             : youtubeThumbnailUrl(row.videoId),
+        ownerName: typeof row.ownerName === "string" ? row.ownerName : "",
+        ownerUserId:
+          typeof row.ownerUserId === "string" ? row.ownerUserId : "",
       };
     })
     .filter((item): item is HistoryTrack => Boolean(item));
@@ -191,6 +198,9 @@ const SESSION_COLUMNS = [
   "current_video_id",
   "current_title",
   "current_thumbnail_url",
+  "current_play_id",
+  "current_owner_name",
+  "current_owner_user_id",
   "playback_state",
   "playback_position_ms",
   "playback_updated_at",
@@ -244,6 +254,7 @@ async function enqueue(args: {
   title: string;
   thumbnailUrl: string;
   addedByName: string;
+  addedByUserId?: string;
 }) {
   const supabase = getSupabase();
   const queue = await listQueue(args.roomId);
@@ -257,6 +268,7 @@ async function enqueue(args: {
       title: args.title,
       thumbnail_url: args.thumbnailUrl,
       added_by_name: args.addedByName,
+      added_by_user_id: args.addedByUserId ?? "",
       sort_order: maxOrder + 1,
     })
     .select("*")
@@ -271,6 +283,8 @@ async function playTrack(args: {
   videoId: string;
   title: string;
   thumbnailUrl: string;
+  ownerName?: string;
+  ownerUserId?: string;
   pushCurrentToHistory?: boolean;
 }) {
   const current = await getSession(args.roomId);
@@ -289,6 +303,8 @@ async function playTrack(args: {
         thumbnailUrl:
           current.current_thumbnail_url ||
           youtubeThumbnailUrl(current.current_video_id),
+        ownerName: current.current_owner_name,
+        ownerUserId: current.current_owner_user_id,
       },
     ].slice(-30);
   }
@@ -298,6 +314,9 @@ async function playTrack(args: {
     current_video_id: args.videoId,
     current_title: args.title,
     current_thumbnail_url: args.thumbnailUrl,
+    current_play_id: randomUUID(),
+    current_owner_name: args.ownerName ?? "",
+    current_owner_user_id: args.ownerUserId ?? "",
     playback_state: "playing",
     playback_position_ms: 0,
     playback_updated_at: now,
@@ -310,6 +329,7 @@ export async function addYoutubeFromLineMessage(args: {
   sourceId: string;
   text: string;
   addedByName: string;
+  addedByUserId?: string;
 }): Promise<
   | { ok: true; title: string; mode: "play" | "queue"; thumbnailUrl: string; videoId: string }
   | { ok: false; reason: string }
@@ -333,6 +353,8 @@ export async function addYoutubeFromLineMessage(args: {
       videoId: meta.videoId,
       title: meta.title,
       thumbnailUrl: meta.thumbnailUrl,
+      ownerName: args.addedByName,
+      ownerUserId: args.addedByUserId,
       pushCurrentToHistory: false,
     });
     await logRoomEvent({
@@ -358,6 +380,7 @@ export async function addYoutubeFromLineMessage(args: {
     title: meta.title,
     thumbnailUrl: meta.thumbnailUrl,
     addedByName: args.addedByName,
+    addedByUserId: args.addedByUserId,
   });
   await logRoomEvent({
     roomId: room.id,
@@ -404,7 +427,8 @@ export async function advanceQueue(roomId: string, opts?: { forceSkip?: boolean 
         thumbnailUrl:
           session.current_thumbnail_url ||
           youtubeThumbnailUrl(session.current_video_id),
-        addedByName: "โบ้",
+        addedByName: session.current_owner_name || "โบ้",
+        addedByUserId: session.current_owner_user_id,
       });
     }
 
@@ -413,6 +437,8 @@ export async function advanceQueue(roomId: string, opts?: { forceSkip?: boolean 
       videoId: next.youtube_video_id,
       title: next.title,
       thumbnailUrl: next.thumbnail_url || youtubeThumbnailUrl(next.youtube_video_id),
+      ownerName: next.added_by_name,
+      ownerUserId: next.added_by_user_id,
     });
 
     const supabase = getSupabase();
@@ -435,11 +461,52 @@ export async function advanceQueue(roomId: string, opts?: { forceSkip?: boolean 
     current_video_id: null,
     current_title: "",
     current_thumbnail_url: "",
+    current_play_id: "",
+    current_owner_name: "",
+    current_owner_user_id: "",
     playback_state: "paused",
     playback_position_ms: 0,
     playback_updated_at: now,
     duration_ms: 0,
   });
+}
+
+/**
+ * Likes collected for one play of a track. Returns null when the play earned
+ * nothing, or when its score was already announced.
+ */
+export async function claimTrackScore(roomId: string, playId: string) {
+  if (!playId) return null;
+  const supabase = getSupabase();
+
+  const { data, error } = await supabase
+    .from("room_likes")
+    .select("*")
+    .eq("room_id", roomId)
+    .eq("play_id", playId)
+    .order("created_at", { ascending: true });
+
+  if (error) throw error;
+  const likes = (data ?? []) as RoomLike[];
+  if (likes.length === 0) return null;
+
+  // The primary key makes this the dedupe: a second caller loses the race.
+  const claim = await supabase
+    .from("room_score_announcements")
+    .insert({ play_id: playId, room_id: roomId });
+  if (claim.error) return null;
+
+  const first = likes[0];
+  if (!first) return null;
+
+  return {
+    ownerName: first.owner_name,
+    trackTitle: first.track_title || first.video_id,
+    points: likes.length,
+    likerNames: [...new Set(likes.map((like) => like.liker_name))].filter(
+      Boolean,
+    ),
+  };
 }
 
 export { LOOP_ORDER, emptySession, writeSession, listQueue, enqueue, playTrack };

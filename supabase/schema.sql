@@ -28,6 +28,10 @@ create table if not exists public.room_sessions (
   current_video_id text,
   current_title text not null default '',
   current_thumbnail_url text not null default '',
+  -- identifies one *play* of a track, so likes reset when the song replays
+  current_play_id text not null default '',
+  current_owner_name text not null default '',
+  current_owner_user_id text not null default '',
   playback_state text not null default 'paused' check (playback_state in ('playing', 'paused')),
   playback_position_ms int not null default 0,
   playback_updated_at timestamptz not null default now(),
@@ -56,6 +60,7 @@ create table if not exists public.room_queue (
   title text not null default '',
   thumbnail_url text not null default '',
   added_by_name text not null default '',
+  added_by_user_id text not null default '',
   sort_order int not null default 0,
   created_at timestamptz not null default now()
 );
@@ -101,6 +106,55 @@ create policy "Anyone can read room events"
 create policy "Anyone can insert room events"
   on public.room_events for insert with check (true);
 
+-- One like per listener per play. The requester cannot like their own song.
+create table if not exists public.room_likes (
+  id uuid primary key default gen_random_uuid(),
+  room_id text not null references public.rooms (id) on delete cascade,
+  play_id text not null,
+  video_id text not null,
+  track_title text not null default '',
+  owner_name text not null default '',
+  owner_user_id text not null default '',
+  liker_key text not null,
+  liker_name text not null default '',
+  liker_picture_url text not null default '',
+  created_at timestamptz not null default now(),
+  unique (play_id, liker_key)
+);
+
+create index if not exists room_likes_room_created_idx
+  on public.room_likes (room_id, created_at desc);
+
+create index if not exists room_likes_play_idx
+  on public.room_likes (play_id);
+
+alter table public.room_likes enable row level security;
+
+create policy "Anyone can read room likes"
+  on public.room_likes for select using (true);
+
+create policy "Anyone can insert room likes"
+  on public.room_likes for insert with check (true);
+
+create policy "Anyone can delete room likes"
+  on public.room_likes for delete using (true);
+
+-- Keeps the end-of-song score message from being sent twice for one play.
+create table if not exists public.room_score_announcements (
+  play_id text primary key,
+  room_id text not null references public.rooms (id) on delete cascade,
+  created_at timestamptz not null default now()
+);
+
+alter table public.room_score_announcements enable row level security;
+
+create policy "Anyone can read score announcements"
+  on public.room_score_announcements for select using (true);
+
+create policy "Anyone can insert score announcements"
+  on public.room_score_announcements for insert with check (true);
+
 alter publication supabase_realtime add table public.room_sessions;
 alter publication supabase_realtime add table public.room_queue;
 alter publication supabase_realtime add table public.room_events;
+alter publication supabase_realtime add table public.room_likes;

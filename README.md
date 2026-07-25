@@ -16,7 +16,8 @@
 2. สร้าง Supabase project แล้วรัน:
    - `supabase/schema.sql` (โปรเจกต์ใหม่) **หรือ**
    - `supabase/migration-add-room-events.sql` (ถ้ามี schema เดิมแล้ว เพิ่ม activity)
-   - เปิด Realtime ให้ `room_sessions`, `room_queue`, `room_events`
+   - `supabase/migration-add-song-likes.sql` (ถ้ามี schema เดิมแล้ว เพิ่มระบบถูกใจ/คะแนน)
+   - เปิด Realtime ให้ `room_sessions`, `room_queue`, `room_events`, `room_likes`
 3. สร้าง LINE Messaging API channel
    - Webhook URL: `https://<your-domain>/api/line/webhook`
    - ใส่ `LINE_CHANNEL_SECRET` และ `LINE_CHANNEL_ACCESS_TOKEN`

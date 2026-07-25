@@ -87,13 +87,92 @@
   border-color: rgba(255, 122, 24, 0.45);
 }
 
+.headerActions {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  flex-shrink: 0;
+}
+
+.trophyBtn {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.3rem;
+  padding: 0.55rem 0.7rem;
+  border: 1px solid rgba(250, 204, 21, 0.35);
+  background: rgba(250, 204, 21, 0.1);
+  color: #facc15;
+  cursor: pointer;
+  font: inherit;
+  transition: background 0.2s ease, border-color 0.2s ease;
+}
+
+.trophyBtn:hover {
+  background: rgba(250, 204, 21, 0.2);
+  border-color: rgba(250, 204, 21, 0.6);
+}
+
+.trophyCount {
+  font-size: 0.8rem;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+}
+
 .now {
   display: grid;
-  grid-template-columns: 5.5rem 1fr;
+  grid-template-columns: 5.5rem 1fr auto;
   gap: 0.95rem;
+  align-items: center;
   margin-bottom: 1.4rem;
   animation: rise 0.65s ease both;
   animation-delay: 0.05s;
+}
+
+.nowOwner {
+  margin: 0;
+  font-size: 0.75rem;
+  opacity: 0.6;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.likeBtn {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.15rem;
+  width: 3.1rem;
+  padding: 0.5rem 0;
+  border: 1px solid rgba(255, 247, 237, 0.14);
+  background: rgba(255, 247, 237, 0.05);
+  color: #fff7ed;
+  cursor: pointer;
+  font: inherit;
+  transition: color 0.15s ease, border-color 0.15s ease, background 0.15s ease;
+}
+
+.likeBtn:hover:not(:disabled) {
+  color: #fb7185;
+  border-color: rgba(251, 113, 133, 0.45);
+  background: rgba(251, 113, 133, 0.12);
+}
+
+.likeBtn:disabled {
+  cursor: not-allowed;
+  opacity: 0.55;
+}
+
+.likeBtnOn {
+  color: #fb7185;
+  border-color: rgba(251, 113, 133, 0.5);
+  background: rgba(251, 113, 133, 0.14);
+}
+
+.likeCount {
+  font-size: 0.78rem;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
 }
 
 .art {
@@ -611,6 +690,217 @@
   margin: 0.2rem 0 0;
   font-size: 0.72rem;
   opacity: 0.5;
+}
+
+.sheetBackdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 40;
+  display: flex;
+  align-items: flex-end;
+  justify-content: center;
+  padding: 1rem;
+  background: rgba(8, 8, 10, 0.72);
+  backdrop-filter: blur(3px);
+  animation: fade 0.2s ease both;
+}
+
+.sheet {
+  width: min(100%, 28rem);
+  max-height: 80dvh;
+  overflow-y: auto;
+  padding: 1.1rem;
+  background: #141118;
+  border: 1px solid rgba(255, 247, 237, 0.14);
+  animation: rise 0.28s ease both;
+}
+
+.sheetHead {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 0.75rem;
+  margin-bottom: 1rem;
+}
+
+.sheetTitleWrap {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.6rem;
+  min-width: 0;
+}
+
+.sheetIcon {
+  color: #facc15;
+  flex-shrink: 0;
+  margin-top: 0.1rem;
+}
+
+.sheetTitle {
+  margin: 0;
+  font-family: var(--font-display), sans-serif;
+  font-size: 1.15rem;
+  letter-spacing: 0.04em;
+}
+
+.sheetHint {
+  margin: 0.15rem 0 0;
+  font-size: 0.74rem;
+  opacity: 0.55;
+}
+
+.sheetClose {
+  display: grid;
+  place-items: center;
+  width: 2rem;
+  height: 2rem;
+  flex-shrink: 0;
+  border: 1px solid rgba(255, 247, 237, 0.14);
+  background: transparent;
+  color: #fff7ed;
+  cursor: pointer;
+}
+
+.sheetClose:hover {
+  border-color: rgba(255, 122, 24, 0.5);
+  background: rgba(255, 122, 24, 0.12);
+}
+
+.scoreList {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+.scoreItem {
+  border: 1px solid rgba(255, 247, 237, 0.1);
+  background: rgba(255, 247, 237, 0.03);
+}
+
+.scoreRow {
+  display: grid;
+  grid-template-columns: 1.75rem 1fr auto auto;
+  align-items: center;
+  gap: 0.6rem;
+  width: 100%;
+  padding: 0.7rem 0.75rem;
+  border: none;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.scoreRow:hover {
+  background: rgba(255, 122, 24, 0.08);
+}
+
+.rank {
+  display: grid;
+  place-items: center;
+  width: 1.75rem;
+  height: 1.75rem;
+  border-radius: 50%;
+  background: rgba(255, 247, 237, 0.08);
+  font-size: 0.8rem;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+}
+
+.rankGold {
+  background: rgba(250, 204, 21, 0.2);
+  color: #facc15;
+}
+
+.rankSilver {
+  background: rgba(226, 232, 240, 0.18);
+  color: #e2e8f0;
+}
+
+.rankBronze {
+  background: rgba(217, 119, 6, 0.22);
+  color: #f0a04b;
+}
+
+.scoreName {
+  font-size: 0.92rem;
+  font-weight: 700;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.scorePoints {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.25rem;
+  color: #fb7185;
+  font-size: 0.85rem;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+}
+
+.scoreChevron {
+  opacity: 0.5;
+  transition: transform 0.2s ease;
+}
+
+.scoreChevronOpen {
+  transform: rotate(180deg);
+}
+
+.scoreTracks {
+  list-style: none;
+  margin: 0;
+  padding: 0 0.75rem 0.7rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.45rem;
+}
+
+.scoreTrack {
+  display: grid;
+  grid-template-columns: 2.6rem 1fr auto;
+  align-items: center;
+  gap: 0.6rem;
+}
+
+.scoreTrackThumb {
+  width: 2.6rem;
+  height: 1.85rem;
+  background:
+    linear-gradient(145deg, #2a2118, #151821),
+    center / cover no-repeat;
+  border: 1px solid rgba(255, 247, 237, 0.1);
+}
+
+.scoreTrackTitle {
+  font-size: 0.82rem;
+  line-height: 1.3;
+  overflow: hidden;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+}
+
+.scoreTrackPoints {
+  font-size: 0.8rem;
+  font-weight: 700;
+  color: #fb7185;
+  font-variant-numeric: tabular-nums;
+}
+
+@keyframes fade {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
 }
 
 @keyframes rise {

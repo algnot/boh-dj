@@ -9,6 +9,8 @@ import {
 } from "react";
 import {
   Activity,
+  ChevronDown,
+  Heart,
   ListMusic,
   MonitorPlay,
   Pause,
@@ -18,6 +20,8 @@ import {
   Repeat2,
   SkipBack,
   SkipForward,
+  Trophy,
+  X,
 } from "lucide-react";
 import { formatMs } from "@/lib/format-time";
 import { formatEventTime } from "@/lib/room-events";
@@ -69,6 +73,12 @@ export function ControlPanel() {
     skipNext,
     playPrevious,
     cycleLoopMode,
+    currentLikes,
+    hasLikedCurrent,
+    canLikeCurrent,
+    ownsCurrentTrack,
+    leaderboard,
+    toggleLikeCurrent,
     removeFromQueue,
     playQueueItem,
     addToQueue,
@@ -78,12 +88,16 @@ export function ControlPanel() {
   const [urlInput, setUrlInput] = useState("");
   const [error, setError] = useState("");
   const [seeking, setSeeking] = useState<number | null>(null);
+  const [scoreOpen, setScoreOpen] = useState(false);
+  const [openEntry, setOpenEntry] = useState<string | null>(null);
 
   const duration = session.duration_ms > 0 ? session.duration_ms : 0;
   const displayMs = seeking ?? estimatedPositionMs;
   const progress =
     duration > 0 ? Math.min(100, (displayMs / duration) * 100) : 0;
   const loop = loopInfo(session.loop_mode);
+  const likeCount = currentLikes.length;
+  const totalPoints = leaderboard.reduce((sum, row) => sum + row.points, 0);
 
   const thumb = useMemo(() => {
     if (session.current_thumbnail_url) return session.current_thumbnail_url;
@@ -142,15 +156,29 @@ export function ControlPanel() {
             </div>
           </div>
         </div>
-        <Link
-          href={`/display/${roomId}`}
-          className={styles.displayLink}
-          target="_blank"
-          rel="noreferrer"
-        >
-          <MonitorPlay size={18} strokeWidth={2.2} />
-          หน้า Display
-        </Link>
+        <div className={styles.headerActions}>
+          <button
+            type="button"
+            className={styles.trophyBtn}
+            onClick={() => setScoreOpen(true)}
+            aria-label="ดูอันดับคะแนน"
+            title="อันดับคะแนน"
+          >
+            <Trophy size={18} strokeWidth={2.2} />
+            {totalPoints > 0 ? (
+              <span className={styles.trophyCount}>{totalPoints}</span>
+            ) : null}
+          </button>
+          <Link
+            href={`/display/${roomId}`}
+            className={styles.displayLink}
+            target="_blank"
+            rel="noreferrer"
+          >
+            <MonitorPlay size={18} strokeWidth={2.2} />
+            หน้า Display
+          </Link>
+        </div>
       </header>
 
       <section className={styles.now}>
@@ -168,7 +196,43 @@ export function ControlPanel() {
           <h1 className={styles.title}>
             {session.current_title || "ยังไม่มีเพลง"}
           </h1>
+          {session.current_owner_name ? (
+            <p className={styles.nowOwner}>
+              ขอโดย {session.current_owner_name}
+            </p>
+          ) : null}
         </div>
+
+        {session.current_video_id ? (
+          <button
+            type="button"
+            className={`${styles.likeBtn} ${
+              hasLikedCurrent ? styles.likeBtnOn : ""
+            }`}
+            onClick={() => void toggleLikeCurrent()}
+            disabled={!canLikeCurrent}
+            aria-pressed={hasLikedCurrent}
+            aria-label={
+              ownsCurrentTrack
+                ? `เพลงของคุณ ได้ ${likeCount} คะแนน`
+                : hasLikedCurrent
+                  ? "เลิกถูกใจเพลงนี้"
+                  : "ถูกใจเพลงนี้"
+            }
+            title={
+              ownsCurrentTrack
+                ? "เพลงของคุณเอง ให้คนอื่นกดถูกใจได้"
+                : "กดถูกใจให้คนขอเพลงได้คะแนน"
+            }
+          >
+            <Heart
+              size={20}
+              strokeWidth={2.2}
+              fill={hasLikedCurrent ? "currentColor" : "none"}
+            />
+            <span className={styles.likeCount}>{likeCount}</span>
+          </button>
+        ) : null}
       </section>
 
       <section className={styles.transport}>
@@ -399,6 +463,117 @@ export function ControlPanel() {
             </ul>
           )}
         </section>
+      ) : null}
+
+      {scoreOpen ? (
+        <div
+          className={styles.sheetBackdrop}
+          role="presentation"
+          onClick={() => setScoreOpen(false)}
+        >
+          <div
+            className={styles.sheet}
+            role="dialog"
+            aria-modal="true"
+            aria-label="อันดับคะแนน"
+            onClick={(event) => event.stopPropagation()}
+          >
+            <div className={styles.sheetHead}>
+              <div className={styles.sheetTitleWrap}>
+                <Trophy size={20} strokeWidth={2.2} className={styles.sheetIcon} />
+                <div>
+                  <h2 className={styles.sheetTitle}>อันดับคะแนน</h2>
+                  <p className={styles.sheetHint}>
+                    1 หัวใจ = 1 คะแนนให้คนขอเพลง
+                  </p>
+                </div>
+              </div>
+              <button
+                type="button"
+                className={styles.sheetClose}
+                onClick={() => setScoreOpen(false)}
+                aria-label="ปิด"
+              >
+                <X size={18} strokeWidth={2.4} />
+              </button>
+            </div>
+
+            {leaderboard.length === 0 ? (
+              <p className={styles.queueEmpty}>
+                ยังไม่มีใครได้คะแนน — กดหัวใจให้เพลงที่ชอบได้เลย
+              </p>
+            ) : (
+              <ul className={styles.scoreList}>
+                {leaderboard.map((entry, index) => {
+                  const expanded = openEntry === entry.key;
+                  return (
+                    <li key={entry.key} className={styles.scoreItem}>
+                      <button
+                        type="button"
+                        className={styles.scoreRow}
+                        onClick={() =>
+                          setOpenEntry(expanded ? null : entry.key)
+                        }
+                        aria-expanded={expanded}
+                      >
+                        <span
+                          className={`${styles.rank} ${
+                            index === 0
+                              ? styles.rankGold
+                              : index === 1
+                                ? styles.rankSilver
+                                : index === 2
+                                  ? styles.rankBronze
+                                  : ""
+                          }`}
+                        >
+                          {index + 1}
+                        </span>
+                        <span className={styles.scoreName}>{entry.name}</span>
+                        <span className={styles.scorePoints}>
+                          <Heart size={14} strokeWidth={2.4} fill="currentColor" />
+                          {entry.points}
+                        </span>
+                        <ChevronDown
+                          size={18}
+                          strokeWidth={2.2}
+                          className={`${styles.scoreChevron} ${
+                            expanded ? styles.scoreChevronOpen : ""
+                          }`}
+                        />
+                      </button>
+
+                      {expanded ? (
+                        <ul className={styles.scoreTracks}>
+                          {entry.tracks.map((track) => (
+                            <li
+                              key={track.videoId}
+                              className={styles.scoreTrack}
+                            >
+                              <span
+                                className={styles.scoreTrackThumb}
+                                style={{
+                                  backgroundImage: `url(https://i.ytimg.com/vi/${track.videoId}/hqdefault.jpg)`,
+                                }}
+                                aria-hidden
+                              />
+                              <span className={styles.scoreTrackTitle}>
+                                {track.title}
+                              </span>
+                              <span className={styles.scoreTrackPoints}>
+                                +{track.points}
+                              </span>
+                            </li>
+                          ))}
+                        </ul>
+                      ) : null}
+                    </li>
+                  );
+                })}
+              </ul>
+            )}
+          </div>
+        </div>
       ) : null}
     </div>
   );
