@@ -81,9 +81,9 @@ export function roomReadyFlex(args: {
               },
               {
                 type: "button",
-                style: "secondary",
+                style: "primary",
                 height: "md",
-                color: "#1C2230",
+                color: "#14B8A6",
                 action: {
                   type: "uri",
                   label: "เปิดจอ Display",
@@ -123,6 +123,7 @@ export function roomReadyFlex(args: {
 export function songQueuedFlex(args: {
   mode: "play" | "queue";
   title: string;
+  thumbnailUrl?: string;
   controlUrl?: string;
   displayUrl?: string;
 }): FlexMessage {
@@ -146,14 +147,42 @@ export function songQueuedFlex(args: {
   if (args.displayUrl) {
     buttons.push({
       type: "button",
-      style: "secondary",
+      style: "primary",
       height: "sm",
-      color: "#1C2230",
+      color: "#14B8A6",
       action: {
         type: "uri",
         label: "เปิดจอ",
         uri: args.displayUrl,
       },
+    });
+  }
+
+  const bodyContents: messagingApi.FlexComponent[] = [
+    {
+      type: "text",
+      text: `${emoji}  ${heading}`,
+      weight: "bold",
+      size: "md",
+      color: "#FFF7ED",
+    },
+    {
+      type: "text",
+      text: args.title,
+      size: "sm",
+      color: "#D6D3D1",
+      wrap: true,
+      maxLines: 3,
+    },
+  ];
+
+  if (buttons.length > 0) {
+    bodyContents.push({
+      type: "box",
+      layout: "vertical",
+      spacing: "sm",
+      margin: "md",
+      contents: buttons,
     });
   }
 
@@ -163,40 +192,22 @@ export function songQueuedFlex(args: {
     contents: {
       type: "bubble",
       size: "kilo",
+      hero: args.thumbnailUrl
+        ? {
+            type: "image",
+            url: args.thumbnailUrl,
+            size: "full",
+            aspectRatio: "16:9",
+            aspectMode: "cover",
+          }
+        : undefined,
       body: {
         type: "box",
         layout: "vertical",
         spacing: "md",
         paddingAll: "16px",
         backgroundColor: "#0B0C10",
-        contents: [
-          {
-            type: "text",
-            text: `${emoji}  ${heading}`,
-            weight: "bold",
-            size: "md",
-            color: "#FFF7ED",
-          },
-          {
-            type: "text",
-            text: args.title,
-            size: "sm",
-            color: "#D6D3D1",
-            wrap: true,
-            maxLines: 3,
-          },
-          ...(buttons.length > 0
-            ? [
-                {
-                  type: "box" as const,
-                  layout: "vertical" as const,
-                  spacing: "sm" as const,
-                  margin: "md" as const,
-                  contents: buttons,
-                },
-              ]
-            : []),
-        ],
+        contents: bodyContents,
       },
     },
   };

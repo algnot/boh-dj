@@ -216,14 +216,16 @@ export function DisplayPlayer() {
               endedHandledRef.current = false;
             }
 
-            if (applyingRemoteRef.current) return;
-
+            // Always handle ENDED — even during remote apply.
+            // Heartbeats briefly set applyingRemoteRef and used to swallow ENDED.
             if (state === YT_STATE.ENDED) {
               if (endedHandledRef.current) return;
               endedHandledRef.current = true;
               onEndedRef.current();
               return;
             }
+
+            if (applyingRemoteRef.current) return;
 
             if (state === YT_STATE.PAUSED) {
               void syncPlaybackRef.current({
@@ -273,10 +275,31 @@ export function DisplayPlayer() {
     const videoId = session.current_video_id;
     const remoteKey = `${videoId}|${session.playback_state}|${session.playback_updated_at}|${session.playback_position_ms}`;
     if (remoteKey === lastRemoteKeyRef.current) return;
+
+    // Host is the clock — ignore own heartbeat position ticks unless video/state
+    // changed or control issued a real seek (large jump).
+    if (isHost) {
+      const prev = lastRemoteKeyRef.current;
+      const videoStatePrefix = `${videoId}|${session.playback_state}|`;
+      if (prev.startsWith(videoStatePrefix)) {
+        const targetSec = targetSecondsFromSession(session);
+        let current = 0;
+        try {
+          current = player.getCurrentTime();
+        } catch {
+          current = 0;
+        }
+        if (Math.abs(current - targetSec) < 2.5) {
+          lastRemoteKeyRef.current = remoteKey;
+          return;
+        }
+      }
+    }
+
     lastRemoteKeyRef.current = remoteKey;
 
     applyingRemoteRef.current = true;
-    endedHandledRef.current = false;
+    // Don't clear endedHandled here on heartbeat — only when video changes below
 
     const targetSec = targetSecondsFromSession(session);
 
@@ -288,6 +311,7 @@ export function DisplayPlayer() {
           // ignore
         }
         lastVideoIdRef.current = null;
+        endedHandledRef.current = false;
         setNeedsUnlock(false);
         return;
       }
@@ -296,6 +320,7 @@ export function DisplayPlayer() {
 
       if (videoChanged) {
         lastVideoIdRef.current = videoId;
+        endedHandledRef.current = false;
         if (session.playback_state === "playing") {
           try {
             player.mute();
@@ -336,8 +361,11 @@ export function DisplayPlayer() {
           playerState !== YT_STATE.PLAYING &&
           playerState !== YT_STATE.BUFFERING
         ) {
-          forcePlay(player, targetSec);
-          scheduleUnlockCheck();
+          // Don't forcePlay over ENDED — let advance handle next track
+          if (playerState !== YT_STATE.ENDED) {
+            forcePlay(player, targetSec);
+            scheduleUnlockCheck();
+          }
         }
       } else if (playerState === YT_STATE.PLAYING) {
         player.pauseVideo();
@@ -350,6 +378,7 @@ export function DisplayPlayer() {
     }
   }, [
     ready,
+    isHost,
     scheduleUnlockCheck,
     session.current_video_id,
     session.playback_position_ms,
@@ -364,9 +393,17 @@ export function DisplayPlayer() {
 
     const tick = () => {
       const player = playerRef.current;
-      if (!player || !readyRef.current || applyingRemoteRef.current) return;
+      if (!player || !readyRef.current) return;
       try {
         const state = player.getPlayerState();
+        if (state === YT_STATE.ENDED) {
+          if (!endedHandledRef.current) {
+            endedHandledRef.current = true;
+            onEndedRef.current();
+          }
+          return;
+        }
+        if (applyingRemoteRef.current) return;
         if (state !== YT_STATE.PLAYING && state !== YT_STATE.BUFFERING) return;
         void syncPlaybackRef.current({
           state: "playing",
@@ -394,6 +431,13 @@ export function DisplayPlayer() {
 
       try {
         const state = player.getPlayerState();
+        if (state === YT_STATE.ENDED) {
+          if (!endedHandledRef.current) {
+            endedHandledRef.current = true;
+            onEndedRef.current();
+          }
+          return;
+        }
         if (state !== YT_STATE.PLAYING && state !== YT_STATE.BUFFERING) {
           const target = targetSecondsFromSession(sessionRef.current);
           forcePlay(player, target);

@@ -286,6 +286,20 @@ export function ControlPanel() {
                     onClick={() => void playQueueItem(item.id)}
                     disabled={busy}
                   >
+                    <span
+                      className={styles.queueThumb}
+                      style={
+                        item.thumbnail_url || item.youtube_video_id
+                          ? {
+                              backgroundImage: `url(${
+                                item.thumbnail_url ||
+                                `https://i.ytimg.com/vi/${item.youtube_video_id}/hqdefault.jpg`
+                              })`,
+                            }
+                          : undefined
+                      }
+                      aria-hidden
+                    />
                     <span className={styles.queueIndex}>{index + 1}</span>
                     <span className={styles.queueMeta}>
                       <span className={styles.queueSong}>{item.title}</span>

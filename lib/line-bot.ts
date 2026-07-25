@@ -156,6 +156,7 @@ async function handleYoutubeLink(event: WebhookEvent) {
     songQueuedFlex({
       mode: result.mode,
       title: result.title,
+      thumbnailUrl: result.thumbnailUrl,
       controlUrl: room ? controlUrl(room) : undefined,
       displayUrl: room ? displayUrl(room.id) : undefined,
     }),

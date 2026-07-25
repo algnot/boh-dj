@@ -299,7 +299,10 @@ export async function addYoutubeFromLineMessage(args: {
   sourceId: string;
   text: string;
   addedByName: string;
-}): Promise<{ ok: true; title: string; mode: "play" | "queue" } | { ok: false; reason: string }> {
+}): Promise<
+  | { ok: true; title: string; mode: "play" | "queue"; thumbnailUrl: string; videoId: string }
+  | { ok: false; reason: string }
+> {
   const videoId = extractYoutubeVideoIdFromText(args.text);
   if (!videoId) {
     return { ok: false, reason: "no_youtube" };
@@ -329,7 +332,13 @@ export async function addYoutubeFromLineMessage(args: {
       trackTitle: meta.title,
       trackVideoId: meta.videoId,
     });
-    return { ok: true, title: meta.title, mode: "play" };
+    return {
+      ok: true,
+      title: meta.title,
+      mode: "play",
+      thumbnailUrl: meta.thumbnailUrl,
+      videoId: meta.videoId,
+    };
   }
 
   await enqueue({
@@ -348,7 +357,13 @@ export async function addYoutubeFromLineMessage(args: {
     trackVideoId: meta.videoId,
   });
 
-  return { ok: true, title: meta.title, mode: "queue" };
+  return {
+    ok: true,
+    title: meta.title,
+    mode: "queue",
+    thumbnailUrl: meta.thumbnailUrl,
+    videoId: meta.videoId,
+  };
 }
 
 export async function advanceQueue(roomId: string, opts?: { forceSkip?: boolean }) {
