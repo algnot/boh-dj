@@ -5,18 +5,59 @@ import { useRouter, useSearchParams } from "next/navigation";
 import styles from "./page.module.css";
 
 /**
- * LIFF entrypoint.
- * Set Endpoint URL in LINE Developers to: {NEXT_PUBLIC_APP_URL}/liff
- * Bot opens: https://liff.line.me/{LIFF_ID}?room={id}&t={token}
+ * LIFF moves extra query into `liff.state` (percent-encoded), e.g.
+ *   /liff?liff.state=%3Froom%3Dabc%26t%3Dxyz  →  ?room=abc&t=xyz
  */
+export function readRoomAndToken(searchParams: URLSearchParams): {
+  room: string;
+  token: string;
+} {
+  let room = (searchParams.get("room") ?? "").trim();
+  let token = (searchParams.get("t") ?? "").trim();
+  if (room && token) return { room, token };
+
+  const rawState = searchParams.get("liff.state");
+  if (!rawState) return { room, token };
+
+  let state = rawState;
+  try {
+    // Decode once or twice in case of double-encoding
+    state = decodeURIComponent(rawState);
+    if (/%[0-9A-Fa-f]{2}/.test(state)) {
+      state = decodeURIComponent(state);
+    }
+  } catch {
+    state = rawState;
+  }
+
+  // /control/{room}?t={token}
+  const controlMatch = state.match(/^\/control\/([^/?#]+)/);
+  if (controlMatch) {
+    room = decodeURIComponent(controlMatch[1] ?? "").trim();
+    const q = state.includes("?") ? state.slice(state.indexOf("?") + 1) : "";
+    token = (new URLSearchParams(q).get("t") ?? "").trim();
+    return { room, token };
+  }
+
+  // ?room=x&t=y  OR  room=x&t=y
+  const query = state.startsWith("?") ? state.slice(1) : state;
+  if (query.includes("=")) {
+    const parsed = new URLSearchParams(query);
+    room = (parsed.get("room") ?? room).trim();
+    token = (parsed.get("t") ?? token).trim();
+  }
+
+  return { room, token };
+}
+
 export default function LiffEntryClient() {
   const router = useRouter();
   const searchParams = useSearchParams();
   const [message, setMessage] = useState("กำลังเปิดรีโมท…");
 
   useEffect(() => {
-    const room = (searchParams.get("room") ?? "").trim();
-    const token = (searchParams.get("t") ?? "").trim();
+    const params = new URLSearchParams(searchParams.toString());
+    const { room, token } = readRoomAndToken(params);
     const liffId = process.env.NEXT_PUBLIC_LIFF_ID?.trim();
 
     if (!room || !token) {
