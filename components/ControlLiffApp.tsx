@@ -11,7 +11,6 @@ function ControlLiffBody({ roomId }: { roomId: string }) {
   if (!ready) {
     return (
       <div className={styles.liffGate}>
-        <p className={styles.brand}>โบ้ DJ</p>
         <p className={styles.liffHint}>กำลังเข้าสู่ระบบ LINE…</p>
       </div>
     );
@@ -20,7 +19,6 @@ function ControlLiffBody({ roomId }: { roomId: string }) {
   if (error && !profile) {
     return (
       <div className={styles.liffGate}>
-        <p className={styles.brand}>โบ้ DJ</p>
         <h1 className={styles.title}>เปิด LIFF ไม่สำเร็จ</h1>
         <p className={styles.hint}>{error}</p>
         <p className={styles.hint}>
@@ -34,7 +32,6 @@ function ControlLiffBody({ roomId }: { roomId: string }) {
   if (!isLoggedIn || !profile) {
     return (
       <div className={styles.liffGate}>
-        <p className={styles.brand}>โบ้ DJ</p>
         <h1 className={styles.title}>เข้าสู่ระบบ LINE</h1>
         <p className={styles.hint}>ต้องล็อกอินเพื่อควบคุมห้องและบันทึกว่าใครทำอะไร</p>
         <button type="button" className={styles.loginBtn} onClick={login}>

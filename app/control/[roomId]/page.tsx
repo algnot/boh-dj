@@ -15,7 +15,6 @@ export default async function ControlPage({ params, searchParams }: PageProps) {
   if (!access.ok) {
     return (
       <main className={styles.blocked}>
-        <p className={styles.brand}>โบ้ DJ</p>
         <h1 className={styles.title}>
           {access.reason === "not_found"
             ? "ไม่พบห้องนี้"

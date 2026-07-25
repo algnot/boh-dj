@@ -7,7 +7,6 @@ export default function LiffPage() {
     <Suspense
       fallback={
         <main className={styles.page}>
-          <p className={styles.brand}>โบ้ DJ</p>
           <p className={styles.hint}>กำลังเปิดรีโมท…</p>
         </main>
       }

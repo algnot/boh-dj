@@ -105,7 +105,6 @@ export function ControlPanel() {
     <div className={styles.shell}>
       <header className={styles.header}>
         <div className={styles.headerLeft}>
-          <p className={styles.brand}>โบ้ DJ</p>
           <div className={styles.userRow}>
             {actor.pictureUrl ? (
               // eslint-disable-next-line @next/next/no-img-element

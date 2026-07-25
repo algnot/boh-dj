@@ -14,7 +14,6 @@ export default async function DisplayPage({ params }: PageProps) {
   if (!room) {
     return (
       <main className={styles.blocked}>
-        <p className={styles.brand}>โบ้ DJ</p>
         <h1 className={styles.title}>ไม่พบห้องนี้</h1>
         <p className={styles.hint}>
           พิมพ์คำว่า <strong>โบ้</strong> ใน LINE เพื่อสร้างห้องใหม่

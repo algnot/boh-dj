@@ -17,7 +17,7 @@ const chakraPetch = Chakra_Petch({
 
 export const metadata: Metadata = {
   title: "โบ้ DJ",
-  description: "ฟัง YouTube ด้วยกันผ่าน LINE — สร้างห้องด้วยคำว่า โบ้",
+  description: "สร้างห้องด้วยคำว่า โบ้",
 };
 
 export default function RootLayout({

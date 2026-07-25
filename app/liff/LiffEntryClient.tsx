@@ -135,7 +135,6 @@ export default function LiffEntryClient() {
 
   return (
     <main className={styles.page}>
-      <p className={styles.brand}>โบ้ DJ</p>
       <p className={styles.hint}>{message}</p>
     </main>
   );
