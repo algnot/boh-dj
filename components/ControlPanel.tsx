@@ -15,6 +15,7 @@ import {
   Play,
   Repeat,
   Repeat1,
+  Repeat2,
   SkipBack,
   SkipForward,
 } from "lucide-react";
@@ -24,15 +25,32 @@ import { useRoom } from "@/lib/room-context";
 import type { LoopMode } from "@/lib/types";
 import styles from "./ControlPanel.module.css";
 
-function loopLabel(mode: LoopMode) {
-  if (mode === "one") return "ลูปเพลงเดียว";
-  if (mode === "all") return "ลูปทั้งคิว";
-  return "ลูปปิด";
+function loopInfo(mode: LoopMode) {
+  if (mode === "one") {
+    return {
+      title: "วนเพลงนี้",
+      hint: "จบแล้วเล่นเพลงเดิมซ้ำ",
+      className: styles.loopOne,
+    };
+  }
+  if (mode === "all") {
+    return {
+      title: "วนทั้งคิว",
+      hint: "จบแล้วไปเพลงถัดไป วนครบคิว",
+      className: styles.loopAll,
+    };
+  }
+  return {
+    title: "ไม่วนซ้ำ",
+    hint: "เล่นครบคิวแล้วหยุด",
+    className: styles.loopOff,
+  };
 }
 
 function LoopIcon({ mode }: { mode: LoopMode }) {
   if (mode === "one") return <Repeat1 size={20} strokeWidth={2.2} />;
-  return <Repeat size={20} strokeWidth={2.2} />;
+  if (mode === "all") return <Repeat2 size={20} strokeWidth={2.2} />;
+  return <Repeat size={20} strokeWidth={2.2} className={styles.loopOffIcon} />;
 }
 
 export function ControlPanel() {
@@ -65,6 +83,7 @@ export function ControlPanel() {
   const displayMs = seeking ?? estimatedPositionMs;
   const progress =
     duration > 0 ? Math.min(100, (displayMs / duration) * 100) : 0;
+  const loop = loopInfo(session.loop_mode);
 
   const thumb = useMemo(() => {
     if (session.current_thumbnail_url) return session.current_thumbnail_url;
@@ -222,12 +241,22 @@ export function ControlPanel() {
         <div className={styles.secondary}>
           <button
             type="button"
-            className={styles.chip}
+            className={`${styles.loopBtn} ${loop.className}`}
             onClick={() => void cycleLoopMode()}
             disabled={busy}
+            aria-label={`โหมดวนซ้ำ: ${loop.title}. ${loop.hint}. กดเพื่อเปลี่ยน`}
+            title={loop.hint}
           >
-            <LoopIcon mode={session.loop_mode} />
-            {loopLabel(session.loop_mode)}
+            <span className={styles.loopIconWrap}>
+              <LoopIcon mode={session.loop_mode} />
+              {session.loop_mode === "off" ? (
+                <span className={styles.loopSlash} aria-hidden />
+              ) : null}
+            </span>
+            <span className={styles.loopText}>
+              <span className={styles.loopTitle}>{loop.title}</span>
+              <span className={styles.loopHint}>{loop.hint}</span>
+            </span>
           </button>
         </div>
       </section>

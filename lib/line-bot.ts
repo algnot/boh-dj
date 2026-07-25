@@ -178,31 +178,11 @@ const WELCOME_TEXT = [
   "อยากฟังด้วยกันทั้งแก๊ง? ชวนโบ้เข้ากลุ่มแล้วพิมพ์ \"โบ้\" ได้เลย",
 ].join("\n");
 
-const FIRST_REPLY_TEXT = [
-  "พิมพ์ \"โบ้\" เพื่อสร้างห้องฟังเพลงได้เลย 🎧",
-  "หรือส่งลิงก์ YouTube เข้ามาเพื่อเพิ่มเข้าคิว",
-].join("\n");
-
 async function handleFollow(event: WebhookEvent) {
   if (event.type !== "follow") return false;
   const replyToken = getReplyToken(event);
   if (!replyToken) return true;
   await reply(replyToken, [textMessage(WELCOME_TEXT)]);
-  return true;
-}
-
-async function handleDefaultReply(event: WebhookEvent) {
-  if (event.type !== "message") return false;
-  if (!("message" in event) || event.message.type !== "text") return false;
-
-  const source = sourceFromEvent(event);
-  // Only auto-reply in 1:1 chats so we don't spam groups
-  if (!source || source.sourceType !== "user") return false;
-
-  const replyToken = getReplyToken(event);
-  if (!replyToken) return false;
-
-  await reply(replyToken, [textMessage(FIRST_REPLY_TEXT)]);
   return true;
 }
 
@@ -222,7 +202,6 @@ export async function handleLineWebhook(rawBody: string, signature: string) {
         if (await handleFollow(event)) return;
         if (await handleBohCommand(event)) return;
         if (await handleYoutubeLink(event)) return;
-        if (await handleDefaultReply(event)) return;
       } catch (error) {
         console.error("LINE event error", error);
       }
