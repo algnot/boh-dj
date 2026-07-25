@@ -46,10 +46,7 @@ export function LiffProvider({ children }: { children: ReactNode }) {
     const boot = async () => {
       try {
         const liff = (await import("@line/liff")).default;
-        await liff.init({
-          liffId,
-          withLoginOnExternalBrowser: true,
-        });
+        await liff.init({ liffId });
 
         if (cancelled) return;
 

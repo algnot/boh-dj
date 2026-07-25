@@ -7,8 +7,11 @@ import {
 import {
   addYoutubeFromLineMessage,
   controlUrl,
+  displayUrl,
   getOrCreateRoomForLineSource,
+  getRoomByLineSource,
 } from "@/lib/room-service";
+import { roomReadyFlex, songQueuedFlex } from "@/lib/line-flex";
 import type { LineSourceType } from "@/lib/types";
 
 type Message = messagingApi.Message;
@@ -114,16 +117,14 @@ async function handleBohCommand(event: WebhookEvent) {
     ...source,
     createdByName: displayName,
   });
-  const url = controlUrl(room);
-
-  const intro = created
-    ? "สร้างห้องโบ้ DJ แล้ว 🎧"
-    : "ห้องโบ้ DJ ของแชทนี้พร้อมแล้ว 🎧";
 
   await reply(replyToken, [
-    textMessage(
-      `${intro}\n\nเปิดหน้าควบคุมใน LINE ได้ที่:\n${url}\n\nจากหน้านั้นกดไปหน้า Display เพื่อเปิดวิดีโอ+เสียง\nส่งลิงก์ YouTube เข้าแชทนี้ได้เลย — โบ้จะใส่คิวให้อัตโนมัติ`,
-    ),
+    roomReadyFlex({
+      created,
+      roomId: room.id,
+      controlUrl: controlUrl(room),
+      displayUrl: displayUrl(room.id),
+    }),
   ]);
 
   return true;
@@ -150,15 +151,15 @@ async function handleYoutubeLink(event: WebhookEvent) {
     return false;
   }
 
-  if (result.mode === "play") {
-    await reply(replyToken, [
-      textMessage(`▶️ เริ่มเล่น "${result.title}" แล้ว`),
-    ]);
-  } else {
-    await reply(replyToken, [
-      textMessage(`➕ เพิ่มคิว "${result.title}" แล้ว`),
-    ]);
-  }
+  const room = await getRoomByLineSource(source.sourceId);
+  await reply(replyToken, [
+    songQueuedFlex({
+      mode: result.mode,
+      title: result.title,
+      controlUrl: room ? controlUrl(room) : undefined,
+      displayUrl: room ? displayUrl(room.id) : undefined,
+    }),
+  ]);
 
   return true;
 }
