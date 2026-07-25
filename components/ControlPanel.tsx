@@ -10,6 +10,8 @@ import {
 import {
   Activity,
   ChevronDown,
+  ChevronLeft,
+  ChevronRight,
   Heart,
   ListMusic,
   MonitorPlay,
@@ -18,6 +20,7 @@ import {
   Repeat,
   Repeat1,
   Repeat2,
+  Shuffle,
   SkipBack,
   SkipForward,
   Trophy,
@@ -26,8 +29,14 @@ import {
 import { formatMs } from "@/lib/format-time";
 import { formatEventTime } from "@/lib/room-events";
 import { useRoom } from "@/lib/room-context";
-import type { LoopMode } from "@/lib/types";
+import type { LoopMode, QueueItem } from "@/lib/types";
 import styles from "./ControlPanel.module.css";
+
+type ConfirmAction =
+  | { type: "remove"; item: QueueItem }
+  | { type: "play"; item: QueueItem };
+
+const ACTIVITY_PAGE_SIZE = 10;
 
 function loopInfo(mode: LoopMode) {
   if (mode === "one") {
@@ -44,6 +53,13 @@ function loopInfo(mode: LoopMode) {
       className: styles.loopAll,
     };
   }
+  if (mode === "shuffle") {
+    return {
+      title: "ลูปสุ่มทั้งคิว",
+      hint: "สุ่มเพลงถัดไป เพลงใหม่เล่นก่อน ไม่ซ้ำเพลงเดิม",
+      className: styles.loopShuffle,
+    };
+  }
   return {
     title: "ไม่วนซ้ำ",
     hint: "เล่นครบคิวแล้วหยุด",
@@ -54,6 +70,7 @@ function loopInfo(mode: LoopMode) {
 function LoopIcon({ mode }: { mode: LoopMode }) {
   if (mode === "one") return <Repeat1 size={20} strokeWidth={2.2} />;
   if (mode === "all") return <Repeat2 size={20} strokeWidth={2.2} />;
+  if (mode === "shuffle") return <Shuffle size={20} strokeWidth={2.2} />;
   return <Repeat size={20} strokeWidth={2.2} className={styles.loopOffIcon} />;
 }
 
@@ -90,6 +107,8 @@ export function ControlPanel() {
   const [seeking, setSeeking] = useState<number | null>(null);
   const [scoreOpen, setScoreOpen] = useState(false);
   const [openEntry, setOpenEntry] = useState<string | null>(null);
+  const [confirm, setConfirm] = useState<ConfirmAction | null>(null);
+  const [activityPage, setActivityPage] = useState(0);
 
   const duration = session.duration_ms > 0 ? session.duration_ms : 0;
   const displayMs = seeking ?? estimatedPositionMs;
@@ -98,6 +117,22 @@ export function ControlPanel() {
   const loop = loopInfo(session.loop_mode);
   const likeCount = currentLikes.length;
   const totalPoints = leaderboard.reduce((sum, row) => sum + row.points, 0);
+
+  const activityPageCount = Math.max(
+    1,
+    Math.ceil(events.length / ACTIVITY_PAGE_SIZE),
+  );
+  const safeActivityPage = Math.min(activityPage, activityPageCount - 1);
+  const activitySlice = events.slice(
+    safeActivityPage * ACTIVITY_PAGE_SIZE,
+    safeActivityPage * ACTIVITY_PAGE_SIZE + ACTIVITY_PAGE_SIZE,
+  );
+  const activityFrom =
+    events.length === 0 ? 0 : safeActivityPage * ACTIVITY_PAGE_SIZE + 1;
+  const activityTo = Math.min(
+    (safeActivityPage + 1) * ACTIVITY_PAGE_SIZE,
+    events.length,
+  );
 
   const thumb = useMemo(() => {
     if (session.current_thumbnail_url) return session.current_thumbnail_url;
@@ -110,6 +145,17 @@ export function ControlPanel() {
   const onSeekCommit = async (value: number) => {
     setSeeking(null);
     await seekToMs(value);
+  };
+
+  const onConfirmAction = async () => {
+    if (!confirm || busy) return;
+    const action = confirm;
+    setConfirm(null);
+    if (action.type === "remove") {
+      await removeFromQueue(action.item.id);
+      return;
+    }
+    await playQueueItem(action.item.id);
   };
 
   const onAdd = async (event: FormEvent) => {
@@ -203,7 +249,7 @@ export function ControlPanel() {
           ) : null}
         </div>
 
-        {session.current_video_id ? (
+        {session.current_video_id && !ownsCurrentTrack ? (
           <button
             type="button"
             className={`${styles.likeBtn} ${
@@ -213,17 +259,9 @@ export function ControlPanel() {
             disabled={!canLikeCurrent}
             aria-pressed={hasLikedCurrent}
             aria-label={
-              ownsCurrentTrack
-                ? `เพลงของคุณ ได้ ${likeCount} คะแนน`
-                : hasLikedCurrent
-                  ? "เลิกถูกใจเพลงนี้"
-                  : "ถูกใจเพลงนี้"
+              hasLikedCurrent ? "เลิกถูกใจเพลงนี้" : "ถูกใจเพลงนี้"
             }
-            title={
-              ownsCurrentTrack
-                ? "เพลงของคุณเอง ให้คนอื่นกดถูกใจได้"
-                : "กดถูกใจให้คนขอเพลงได้คะแนน"
-            }
+            title="กดถูกใจให้คนขอเพลงได้คะแนน"
           >
             <Heart
               size={20}
@@ -362,7 +400,10 @@ export function ControlPanel() {
           className={`${styles.tab} ${
             activeTab === "activity" ? styles.tabActive : ""
           }`}
-          onClick={() => setActiveTab("activity")}
+          onClick={() => {
+            setActiveTab("activity");
+            setActivityPage(0);
+          }}
         >
           <Activity size={18} strokeWidth={2.2} />
           กิจกรรม
@@ -383,7 +424,7 @@ export function ControlPanel() {
                   <button
                     type="button"
                     className={styles.queueMain}
-                    onClick={() => void playQueueItem(item.id)}
+                    onClick={() => setConfirm({ type: "play", item })}
                     disabled={busy}
                   >
                     <span
@@ -413,7 +454,7 @@ export function ControlPanel() {
                   <button
                     type="button"
                     className={styles.queueRemove}
-                    onClick={() => void removeFromQueue(item.id)}
+                    onClick={() => setConfirm({ type: "remove", item })}
                     disabled={busy}
                     aria-label="ลบออกจากคิว"
                   >
@@ -432,35 +473,66 @@ export function ControlPanel() {
           {events.length === 0 ? (
             <p className={styles.queueEmpty}>ยังไม่มีกิจกรรมในห้องนี้</p>
           ) : (
-            <ul className={styles.activityList}>
-              {events.map((event) => (
-                <li key={event.id} className={styles.activityItem}>
-                  {event.actor_picture_url ? (
-                    // eslint-disable-next-line @next/next/no-img-element
-                    <img
-                      src={event.actor_picture_url}
-                      alt=""
-                      className={styles.activityAvatar}
-                      width={32}
-                      height={32}
-                    />
-                  ) : (
-                    <span className={styles.activityAvatarFallback} aria-hidden>
-                      {(event.actor_name || "?").slice(0, 1)}
-                    </span>
-                  )}
-                  <div className={styles.activityBody}>
-                    <p className={styles.activityMessage}>{event.message}</p>
-                    <p className={styles.activityMeta}>
-                      {event.actor_name}
-                      {event.created_at
-                        ? ` · ${formatEventTime(event.created_at)}`
-                        : ""}
-                    </p>
-                  </div>
-                </li>
-              ))}
-            </ul>
+            <>
+              <ul className={styles.activityList}>
+                {activitySlice.map((event) => (
+                  <li key={event.id} className={styles.activityItem}>
+                    {event.actor_picture_url ? (
+                      // eslint-disable-next-line @next/next/no-img-element
+                      <img
+                        src={event.actor_picture_url}
+                        alt=""
+                        className={styles.activityAvatar}
+                        width={32}
+                        height={32}
+                      />
+                    ) : (
+                      <span
+                        className={styles.activityAvatarFallback}
+                        aria-hidden
+                      >
+                        {(event.actor_name || "?").slice(0, 1)}
+                      </span>
+                    )}
+                    <div className={styles.activityBody}>
+                      <p className={styles.activityMessage}>{event.message}</p>
+                      <p className={styles.activityMeta}>
+                        {event.actor_name}
+                        {event.created_at
+                          ? ` · ${formatEventTime(event.created_at)}`
+                          : ""}
+                      </p>
+                    </div>
+                  </li>
+                ))}
+              </ul>
+
+              {activityPageCount > 1 ? (
+                <div className={styles.pager}>
+                  <button
+                    type="button"
+                    className={styles.pagerBtn}
+                    onClick={() => setActivityPage(safeActivityPage - 1)}
+                    disabled={safeActivityPage === 0}
+                    aria-label="หน้าก่อนหน้า"
+                  >
+                    <ChevronLeft size={18} strokeWidth={2.2} />
+                  </button>
+                  <p className={styles.pagerMeta}>
+                    {activityFrom}–{activityTo} จาก {events.length}
+                  </p>
+                  <button
+                    type="button"
+                    className={styles.pagerBtn}
+                    onClick={() => setActivityPage(safeActivityPage + 1)}
+                    disabled={safeActivityPage >= activityPageCount - 1}
+                    aria-label="หน้าถัดไป"
+                  >
+                    <ChevronRight size={18} strokeWidth={2.2} />
+                  </button>
+                </div>
+              ) : null}
+            </>
           )}
         </section>
       ) : null}
@@ -572,6 +644,70 @@ export function ControlPanel() {
                 })}
               </ul>
             )}
+          </div>
+        </div>
+      ) : null}
+
+      {confirm ? (
+        <div
+          className={styles.sheetBackdrop}
+          role="presentation"
+          onClick={() => setConfirm(null)}
+        >
+          <div
+            className={styles.confirmSheet}
+            role="alertdialog"
+            aria-modal="true"
+            aria-labelledby="confirm-title"
+            aria-describedby="confirm-desc"
+            onClick={(event) => event.stopPropagation()}
+          >
+            <h2 id="confirm-title" className={styles.confirmTitle}>
+              {confirm.type === "remove"
+                ? "ลบเพลงออกจากคิว?"
+                : "เล่นเพลงนี้เลย?"}
+            </h2>
+            <p id="confirm-desc" className={styles.confirmDesc}>
+              {confirm.type === "remove" ? (
+                <>
+                  จะลบ{" "}
+                  <span className={styles.confirmSong}>
+                    {confirm.item.title}
+                  </span>{" "}
+                  ออกจากคิว
+                </>
+              ) : (
+                <>
+                  จะข้ามเพลงที่กำลังเล่น แล้วไปเล่น{" "}
+                  <span className={styles.confirmSong}>
+                    {confirm.item.title}
+                  </span>{" "}
+                  ทันที
+                </>
+              )}
+            </p>
+            <div className={styles.confirmActions}>
+              <button
+                type="button"
+                className={styles.confirmCancel}
+                onClick={() => setConfirm(null)}
+                disabled={busy}
+              >
+                ยกเลิก
+              </button>
+              <button
+                type="button"
+                className={
+                  confirm.type === "remove"
+                    ? styles.confirmDanger
+                    : styles.confirmPrimary
+                }
+                onClick={() => void onConfirmAction()}
+                disabled={busy}
+              >
+                {confirm.type === "remove" ? "ลบคิว" : "เล่นเลย"}
+              </button>
+            </div>
           </div>
         </div>
       ) : null}

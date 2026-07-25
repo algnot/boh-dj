@@ -303,6 +303,7 @@ declare global {
           events?: {
             onReady?: (event: { target: YtPlayer }) => void;
             onStateChange?: (event: YtPlayerEvent) => void;
+            onError?: (event: { data: number; target: YtPlayer }) => void;
           };
         },
       ) => YtPlayer;

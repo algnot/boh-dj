@@ -1,6 +1,6 @@
 export type PlaybackState = "playing" | "paused";
 
-export type LoopMode = "off" | "one" | "all";
+export type LoopMode = "off" | "one" | "all" | "shuffle";
 
 export type LineSourceType = "user" | "group" | "room";
 
@@ -46,6 +46,7 @@ export type QueueItem = {
   thumbnail_url: string;
   added_by_name: string;
   added_by_user_id: string;
+  is_recycled: boolean;
   sort_order: number;
   created_at: string;
 };
@@ -179,6 +180,7 @@ export type Database = {
           thumbnail_url?: string;
           added_by_name?: string;
           added_by_user_id?: string;
+          is_recycled?: boolean;
           sort_order?: number;
           created_at?: string;
         };
@@ -190,6 +192,7 @@ export type Database = {
           thumbnail_url?: string;
           added_by_name?: string;
           added_by_user_id?: string;
+          is_recycled?: boolean;
           sort_order?: number;
           created_at?: string;
         };

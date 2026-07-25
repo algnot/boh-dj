@@ -48,7 +48,7 @@ async function resolveVideoIdClient(urlOrId: string): Promise<string | null> {
   }
 }
 
-const LOOP_ORDER: LoopMode[] = ["all", "one", "off"];
+const LOOP_ORDER: LoopMode[] = ["all", "shuffle", "one", "off"];
 
 function emptySession(roomId: string): RoomSession {
   const now = new Date().toISOString();
@@ -84,6 +84,43 @@ function sortQueue(items: QueueItem[]) {
       a.sort_order - b.sort_order ||
       a.created_at.localeCompare(b.created_at),
   );
+}
+
+/**
+ * Chooses the next track to play.
+ * - shuffle: freshly-added songs (not recycled) play first in order; once the
+ *   pool is all recycled it picks a random one, never the song just playing.
+ * - other modes: plain front-of-queue.
+ */
+function pickNextTrack(
+  queue: QueueItem[],
+  loop: LoopMode,
+  currentVideoId: string | null,
+): QueueItem | undefined {
+  if (loop !== "shuffle") return queue[0];
+
+  const others = currentVideoId
+    ? queue.filter((item) => item.youtube_video_id !== currentVideoId)
+    : queue;
+  const pool = others.length > 0 ? others : queue;
+  if (pool.length === 0) return undefined;
+
+  const fresh = pool.filter((item) => !item.is_recycled);
+  if (fresh.length > 0) return fresh[0];
+
+  return pool[Math.floor(Math.random() * pool.length)];
+}
+
+async function fetchQueueFromDb(roomId: string) {
+  const supabase = getSupabase();
+  const { data, error } = await supabase
+    .from("room_queue")
+    .select("*")
+    .eq("room_id", roomId)
+    .order("sort_order", { ascending: true })
+    .order("created_at", { ascending: true });
+  if (error) throw error;
+  return sortQueue((data ?? []) as QueueItem[]);
 }
 
 function parseHistory(raw: unknown): HistoryTrack[] {
@@ -217,6 +254,10 @@ export function RoomProvider({
   // updated_at instants this client wrote, so realtime echoes of our own writes
   // can be skipped without also dropping updates from the other side.
   const ownWritesRef = useRef<Set<number>>(new Set());
+  // Latest session updated_at (epoch) this client has authoritatively seen.
+  // The host clock uses it so its heartbeat never overwrites a fresh seek /
+  // pause from another client that hasn't reached this tab yet.
+  const lastSeenUatRef = useRef(0);
 
   sessionRef.current = session;
   queueRef.current = queue;
@@ -278,6 +319,7 @@ export function RoomProvider({
 
       setSession(next);
       rememberOwnWrite(now);
+      lastSeenUatRef.current = Date.parse(now);
 
       // Only send the columns being changed. A full-row upsert would let a
       // stale snapshot (e.g. the host heartbeat) clobber loop_mode or a pause
@@ -301,14 +343,40 @@ export function RoomProvider({
   const publishHostClock = useCallback(
     async (args: { positionMs: number; durationMs?: number }) => {
       const supabase = getSupabase();
-      const now = new Date().toISOString();
       const positionMs = Math.max(0, Math.round(args.positionMs));
+
+      // Read the authoritative row first. If someone else changed the session
+      // (seek, pause, next track) since we last saw it, adopt that instead of
+      // stomping it with our clock — otherwise a Control seek gets reverted
+      // before the Display ever applies it.
+      const current = await supabase
+        .from("room_sessions")
+        .select("*")
+        .eq("room_id", roomId)
+        .maybeSingle();
+      if (current.error) throw current.error;
+
+      const row = current.data as RoomSession | null;
+      if (row) {
+        const uat = Date.parse(row.updated_at);
+        if (uat !== lastSeenUatRef.current) {
+          lastSeenUatRef.current = uat;
+          if (!ownWritesRef.current.has(uat)) {
+            setSession(normalizeSession(row));
+          }
+          return;
+        }
+        if (row.playback_state !== "playing") return;
+      }
+
+      const now = new Date().toISOString();
       const durationMs =
         args.durationMs != null
           ? Math.max(0, Math.round(args.durationMs))
           : sessionRef.current.duration_ms;
 
       rememberOwnWrite(now);
+      lastSeenUatRef.current = Date.parse(now);
       setSession((prev) => ({
         ...prev,
         playback_position_ms: positionMs,
@@ -317,7 +385,7 @@ export function RoomProvider({
         updated_at: now,
       }));
 
-      const { data, error } = await supabase
+      const { error } = await supabase
         .from("room_sessions")
         .update({
           playback_position_ms: positionMs,
@@ -326,23 +394,9 @@ export function RoomProvider({
           updated_at: now,
         })
         .eq("room_id", roomId)
-        .eq("playback_state", "playing")
-        .select("*")
-        .maybeSingle();
+        .eq("playback_state", "playing");
 
       if (error) throw error;
-      if (data) return;
-
-      // The room is no longer playing: adopt the authoritative row so the
-      // player stops instead of fighting the pause.
-      const fresh = await supabase
-        .from("room_sessions")
-        .select("*")
-        .eq("room_id", roomId)
-        .maybeSingle();
-      if (fresh.data) {
-        setSession(normalizeSession(fresh.data as RoomSession));
-      }
     },
     [rememberOwnWrite, roomId],
   );
@@ -393,6 +447,7 @@ export function RoomProvider({
       thumbnailUrl: string;
       addedByName?: string;
       addedByUserId?: string;
+      isRecycled?: boolean;
     }) => {
       const supabase = getSupabase();
       const maxOrder = queueRef.current.reduce(
@@ -410,6 +465,7 @@ export function RoomProvider({
           added_by_name: args.addedByName ?? actorRef.current.name,
           added_by_user_id:
             args.addedByUserId ?? actorRef.current.userId ?? "",
+          is_recycled: args.isRecycled ?? false,
           sort_order: maxOrder + 1,
         })
         .select("*")
@@ -417,7 +473,9 @@ export function RoomProvider({
 
       if (error) throw error;
       if (data) {
-        setQueue((prev) => sortQueue([...prev, data as QueueItem]));
+        const row = data as QueueItem;
+        queueRef.current = sortQueue([...queueRef.current, row]);
+        setQueue(queueRef.current);
       }
       return data as QueueItem | null;
     },
@@ -551,10 +609,20 @@ export function RoomProvider({
           return;
         }
 
-        const next = sortQueue(queueRef.current)[0];
+        // Always re-read the queue from DB so a delete on Control isn't
+        // ignored because this host still has a stale in-memory list.
+        const freshQueue = await fetchQueueFromDb(roomId);
+        queueRef.current = freshQueue;
+        setQueue(freshQueue);
+        const next = pickNextTrack(freshQueue, loop, current.current_video_id);
 
         if (next) {
-          if (loop === "all" && current.current_video_id) {
+          // Both loop modes keep the finished song in rotation. Mark it
+          // recycled so shuffle knows it's already been played.
+          if (
+            (loop === "all" || loop === "shuffle") &&
+            current.current_video_id
+          ) {
             await enqueueVideo({
               videoId: current.current_video_id,
               title: current.current_title || current.current_video_id,
@@ -563,6 +631,7 @@ export function RoomProvider({
                 youtubeThumbnailUrl(current.current_video_id),
               addedByName: current.current_owner_name || "โบ้",
               addedByUserId: current.current_owner_user_id,
+              isRecycled: true,
             });
           }
 
@@ -580,11 +649,16 @@ export function RoomProvider({
 
           const supabase = getSupabase();
           await supabase.from("room_queue").delete().eq("id", next.id);
+          queueRef.current = queueRef.current.filter(
+            (item) => item.id !== next.id,
+          );
           setQueue((prev) => prev.filter((item) => item.id !== next.id));
           return;
         }
 
-        if (loop === "all" && current.current_video_id) {
+        // Nothing else to play (queue empty or only holds the current song):
+        // loop all/shuffle just replays the current track.
+        if ((loop === "all" || loop === "shuffle") && current.current_video_id) {
           const now = new Date().toISOString();
           await writeSession({
             playback_state: "playing",
@@ -736,12 +810,14 @@ export function RoomProvider({
               youtubeThumbnailUrl(current.current_video_id),
             added_by_name: current.current_owner_name || "โบ้",
             added_by_user_id: current.current_owner_user_id,
+            is_recycled: true,
             sort_order: minOrder - 1,
           })
           .select("*")
           .single();
         if (!error && data) {
-          setQueue((rows) => sortQueue([data as QueueItem, ...rows]));
+          queueRef.current = sortQueue([data as QueueItem, ...queueRef.current]);
+          setQueue(queueRef.current);
         }
       }
 
@@ -777,7 +853,13 @@ export function RoomProvider({
     const next = LOOP_ORDER[(index + 1) % LOOP_ORDER.length] ?? "all";
     await writeSession({ loop_mode: next });
     const label =
-      next === "one" ? "ลูปเพลงเดียว" : next === "all" ? "ลูปทั้งคิว" : "ปิดลูป";
+      next === "one"
+        ? "ลูปเพลงเดียว"
+        : next === "all"
+          ? "ลูปทั้งคิว"
+          : next === "shuffle"
+            ? "ลูปสุ่มทั้งคิว"
+            : "ปิดลูป";
     await recordEvent({
       eventType: "loop_changed",
       message: `${actorRef.current.name} เปลี่ยนเป็น${label}`,
@@ -891,8 +973,14 @@ export function RoomProvider({
     async (id: string) => {
       const item = queueRef.current.find((q) => q.id === id);
       const supabase = getSupabase();
-      await supabase.from("room_queue").delete().eq("id", id);
-      setQueue((prev) => prev.filter((row) => row.id !== id));
+      const { error } = await supabase.from("room_queue").delete().eq("id", id);
+      if (error) throw error;
+
+      // Update the ref immediately so a concurrent advanceToNext on this
+      // client won't pick the deleted track from a stale snapshot.
+      queueRef.current = queueRef.current.filter((row) => row.id !== id);
+      setQueue(queueRef.current);
+
       if (item) {
         await recordEvent({
           eventType: "queue_removed",
@@ -1023,7 +1111,9 @@ export function RoomProvider({
       if (queueRes.error) throw queueRes.error;
 
       if (sessionRes.data) {
-        setSession(normalizeSession(sessionRes.data as RoomSession));
+        const row = sessionRes.data as RoomSession;
+        lastSeenUatRef.current = Date.parse(row.updated_at);
+        setSession(normalizeSession(row));
       } else {
         const blank = emptySession(roomId);
         setSession(blank);
@@ -1082,10 +1172,9 @@ export function RoomProvider({
           if (payload.eventType === "DELETE") return;
           const row = payload.new as RoomSession;
           if (!row?.room_id) return;
-          if (
-            row.updated_at &&
-            ownWritesRef.current.has(Date.parse(row.updated_at))
-          ) {
+          const uat = row.updated_at ? Date.parse(row.updated_at) : 0;
+          if (uat) lastSeenUatRef.current = uat;
+          if (uat && ownWritesRef.current.has(uat)) {
             return;
           }
           setSession(normalizeSession(row));
@@ -1119,8 +1208,17 @@ export function RoomProvider({
           }
           if (payload.eventType === "DELETE") {
             const row = payload.old as { id?: string };
-            if (!row.id) return;
-            setQueue((prev) => prev.filter((item) => item.id !== row.id));
+            if (row.id) {
+              setQueue((prev) => prev.filter((item) => item.id !== row.id));
+              return;
+            }
+            // Some projects lack REPLICA IDENTITY FULL — old row may be empty.
+            void fetchQueueFromDb(roomId)
+              .then((fresh) => {
+                queueRef.current = fresh;
+                setQueue(fresh);
+              })
+              .catch(() => {});
           }
         },
       )

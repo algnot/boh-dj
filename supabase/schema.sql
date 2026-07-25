@@ -36,7 +36,7 @@ create table if not exists public.room_sessions (
   playback_position_ms int not null default 0,
   playback_updated_at timestamptz not null default now(),
   duration_ms int not null default 0,
-  loop_mode text not null default 'all' check (loop_mode in ('off', 'one', 'all')),
+  loop_mode text not null default 'all' check (loop_mode in ('off', 'one', 'all', 'shuffle')),
   host_client_id text,
   history jsonb not null default '[]'::jsonb,
   updated_at timestamptz not null default now()
@@ -61,6 +61,9 @@ create table if not exists public.room_queue (
   thumbnail_url text not null default '',
   added_by_name text not null default '',
   added_by_user_id text not null default '',
+  -- true when re-queued by loop mode (already played), false for fresh adds.
+  -- Shuffle mode plays fresh songs first, then randomises the recycled pool.
+  is_recycled boolean not null default false,
   sort_order int not null default 0,
   created_at timestamptz not null default now()
 );

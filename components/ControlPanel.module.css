@@ -414,6 +414,16 @@
   background: rgba(20, 184, 166, 0.14);
 }
 
+.loopShuffle {
+  border-color: rgba(139, 92, 246, 0.5);
+  background: rgba(139, 92, 246, 0.12);
+}
+
+.loopShuffle .loopIconWrap {
+  color: #a78bfa;
+  background: rgba(139, 92, 246, 0.16);
+}
+
 .loopOne {
   border-color: rgba(255, 122, 24, 0.45);
   background: rgba(255, 122, 24, 0.1);
@@ -692,6 +702,43 @@
   opacity: 0.5;
 }
 
+.pager {
+  display: grid;
+  grid-template-columns: auto 1fr auto;
+  align-items: center;
+  gap: 0.55rem;
+  margin-top: 0.85rem;
+}
+
+.pagerBtn {
+  display: grid;
+  place-items: center;
+  width: 2.2rem;
+  height: 2.2rem;
+  border: 1px solid rgba(255, 247, 237, 0.14);
+  background: rgba(255, 247, 237, 0.05);
+  color: #fff7ed;
+  cursor: pointer;
+}
+
+.pagerBtn:hover:not(:disabled) {
+  border-color: rgba(255, 122, 24, 0.45);
+  background: rgba(255, 122, 24, 0.12);
+}
+
+.pagerBtn:disabled {
+  opacity: 0.3;
+  cursor: not-allowed;
+}
+
+.pagerMeta {
+  margin: 0;
+  text-align: center;
+  font-size: 0.78rem;
+  font-variant-numeric: tabular-nums;
+  opacity: 0.6;
+}
+
 .sheetBackdrop {
   position: fixed;
   inset: 0;
@@ -764,6 +811,86 @@
 .sheetClose:hover {
   border-color: rgba(255, 122, 24, 0.5);
   background: rgba(255, 122, 24, 0.12);
+}
+
+.confirmSheet {
+  width: min(100%, 22rem);
+  padding: 1.2rem 1.15rem 1.1rem;
+  background: #141118;
+  border: 1px solid rgba(255, 247, 237, 0.14);
+  animation: rise 0.28s ease both;
+}
+
+.confirmTitle {
+  margin: 0;
+  font-family: var(--font-display), sans-serif;
+  font-size: 1.15rem;
+  letter-spacing: 0.03em;
+}
+
+.confirmDesc {
+  margin: 0.55rem 0 0;
+  font-size: 0.88rem;
+  line-height: 1.45;
+  opacity: 0.7;
+}
+
+.confirmSong {
+  color: #fff7ed;
+  font-weight: 700;
+  opacity: 1;
+}
+
+.confirmActions {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 0.55rem;
+  margin-top: 1.15rem;
+}
+
+.confirmCancel,
+.confirmPrimary,
+.confirmDanger {
+  padding: 0.7rem 0.8rem;
+  border: 1px solid rgba(255, 247, 237, 0.14);
+  background: rgba(255, 247, 237, 0.05);
+  color: #fff7ed;
+  font: inherit;
+  font-size: 0.9rem;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.confirmCancel:hover:not(:disabled) {
+  border-color: rgba(255, 247, 237, 0.28);
+  background: rgba(255, 247, 237, 0.1);
+}
+
+.confirmPrimary {
+  border-color: rgba(255, 122, 24, 0.5);
+  background: rgba(255, 122, 24, 0.18);
+  color: #ff9d4d;
+}
+
+.confirmPrimary:hover:not(:disabled) {
+  background: rgba(255, 122, 24, 0.28);
+}
+
+.confirmDanger {
+  border-color: rgba(251, 113, 133, 0.5);
+  background: rgba(251, 113, 133, 0.16);
+  color: #fb7185;
+}
+
+.confirmDanger:hover:not(:disabled) {
+  background: rgba(251, 113, 133, 0.26);
+}
+
+.confirmCancel:disabled,
+.confirmPrimary:disabled,
+.confirmDanger:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
 }
 
 .scoreList {

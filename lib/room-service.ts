@@ -17,7 +17,26 @@ import {
 } from "@/lib/youtube";
 import { logRoomEvent } from "@/lib/room-events";
 
-const LOOP_ORDER: LoopMode[] = ["all", "one", "off"];
+const LOOP_ORDER: LoopMode[] = ["all", "shuffle", "one", "off"];
+
+function pickNextTrack(
+  queue: QueueItem[],
+  loop: LoopMode,
+  currentVideoId: string | null,
+): QueueItem | undefined {
+  if (loop !== "shuffle") return queue[0];
+
+  const others = currentVideoId
+    ? queue.filter((item) => item.youtube_video_id !== currentVideoId)
+    : queue;
+  const pool = others.length > 0 ? others : queue;
+  if (pool.length === 0) return undefined;
+
+  const fresh = pool.filter((item) => !item.is_recycled);
+  if (fresh.length > 0) return fresh[0];
+
+  return pool[Math.floor(Math.random() * pool.length)];
+}
 
 function appBaseUrl() {
   return (process.env.NEXT_PUBLIC_APP_URL ?? "http://localhost:3000").replace(
@@ -255,6 +274,7 @@ async function enqueue(args: {
   thumbnailUrl: string;
   addedByName: string;
   addedByUserId?: string;
+  isRecycled?: boolean;
 }) {
   const supabase = getSupabase();
   const queue = await listQueue(args.roomId);
@@ -269,6 +289,7 @@ async function enqueue(args: {
       thumbnail_url: args.thumbnailUrl,
       added_by_name: args.addedByName,
       added_by_user_id: args.addedByUserId ?? "",
+      is_recycled: args.isRecycled ?? false,
       sort_order: maxOrder + 1,
     })
     .select("*")
@@ -416,10 +437,10 @@ export async function advanceQueue(roomId: string, opts?: { forceSkip?: boolean 
   }
 
   const queue = await listQueue(roomId);
-  const next = queue[0];
+  const next = pickNextTrack(queue, loop, session.current_video_id);
 
   if (next) {
-    if (loop === "all" && session.current_video_id) {
+    if ((loop === "all" || loop === "shuffle") && session.current_video_id) {
       await enqueue({
         roomId,
         videoId: session.current_video_id,
@@ -429,6 +450,7 @@ export async function advanceQueue(roomId: string, opts?: { forceSkip?: boolean 
           youtubeThumbnailUrl(session.current_video_id),
         addedByName: session.current_owner_name || "โบ้",
         addedByUserId: session.current_owner_user_id,
+        isRecycled: true,
       });
     }
 
@@ -446,7 +468,7 @@ export async function advanceQueue(roomId: string, opts?: { forceSkip?: boolean 
     return;
   }
 
-  if (loop === "all" && session.current_video_id) {
+  if ((loop === "all" || loop === "shuffle") && session.current_video_id) {
     const now = new Date().toISOString();
     await writeSession(roomId, {
       playback_state: "playing",
@@ -494,7 +516,12 @@ export async function claimTrackScore(roomId: string, playId: string) {
   const claim = await supabase
     .from("room_score_announcements")
     .insert({ play_id: playId, room_id: roomId });
-  if (claim.error) return null;
+  if (claim.error) {
+    if (claim.error.code !== "23505") {
+      console.warn("score announcement claim failed", claim.error);
+    }
+    return null;
+  }
 
   const first = likes[0];
   if (!first) return null;

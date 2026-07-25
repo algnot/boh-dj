@@ -15,6 +15,7 @@ const DRIFT_SOFT_SEC = 1.25;
 const DRIFT_HARD_SEC = 0.85;
 const HOST_HEARTBEAT_MS = 3500;
 const FOLLOWER_CORRECT_MS = 2000;
+const WATCHDOG_MS = 4000;
 const PLAYER_ELEMENT_ID = "boh-dj-yt-player";
 
 function forcePlay(player: YtPlayer, startSeconds?: number) {
@@ -59,6 +60,10 @@ function targetSecondsFromSession(session: {
   return Math.max(0, (session.playback_position_ms + elapsed) / 1000);
 }
 
+function isLivePlayback(state: number) {
+  return state === YT_STATE.PLAYING || state === YT_STATE.BUFFERING;
+}
+
 export function DisplayPlayer() {
   const {
     ready,
@@ -74,13 +79,19 @@ export function DisplayPlayer() {
   } = useRoom();
 
   const [needsUnlock, setNeedsUnlock] = useState(false);
+  const [playerEpoch, setPlayerEpoch] = useState(0);
 
   const playerRef = useRef<YtPlayer | null>(null);
+  const mountRef = useRef<HTMLDivElement | null>(null);
   const readyRef = useRef(false);
-  const applyingRemoteRef = useRef(false);
+  // Expiry timestamp instead of a sticky boolean — a missed timeout used to
+  // freeze the player forever until a hard refresh.
+  const applyingRemoteUntilRef = useRef(0);
   const lastVideoIdRef = useRef<string | null>(null);
   const lastRemoteKeyRef = useRef("");
   const endedHandledRef = useRef(false);
+  const stuckTicksRef = useRef(0);
+  const bufferingTicksRef = useRef(0);
   const estimatedRef = useRef(estimatedPositionMs);
   const sessionRef = useRef(session);
   const syncPlaybackRef = useRef(syncPlayback);
@@ -95,6 +106,15 @@ export function DisplayPlayer() {
   publishHostClockRef.current = publishHostClock;
   onEndedRef.current = onLocalVideoEnded;
   isHostRef.current = isHost;
+
+  const beginApplyingRemote = useCallback((ms = 700) => {
+    applyingRemoteUntilRef.current = Date.now() + ms;
+  }, []);
+
+  const isApplyingRemote = useCallback(
+    () => Date.now() < applyingRemoteUntilRef.current,
+    [],
+  );
 
   useEffect(() => {
     if (!ready || !clientId) return;
@@ -116,7 +136,7 @@ export function DisplayPlayer() {
       }
       try {
         const state = player.getPlayerState();
-        if (state !== YT_STATE.PLAYING && state !== YT_STATE.BUFFERING) {
+        if (!isLivePlayback(state) && state !== YT_STATE.ENDED) {
           setNeedsUnlock(true);
         } else {
           setNeedsUnlock(false);
@@ -127,17 +147,52 @@ export function DisplayPlayer() {
     }, 900);
   }, []);
 
+  const ensureMountNode = useCallback(() => {
+    const wrap = mountRef.current;
+    if (!wrap) return null;
+    let node = document.getElementById(PLAYER_ELEMENT_ID);
+    if (!node) {
+      node = document.createElement("div");
+      node.id = PLAYER_ELEMENT_ID;
+      node.className = styles.player;
+      wrap.insertBefore(node, wrap.firstChild);
+    }
+    return node;
+  }, []);
+
   const unlockPlayback = useCallback(() => {
     const player = playerRef.current;
     if (!player) return;
-    applyingRemoteRef.current = true;
+    beginApplyingRemote(700);
     const seek = Math.max(0, estimatedRef.current / 1000);
     forcePlay(player, seek);
     setNeedsUnlock(false);
-    window.setTimeout(() => {
-      applyingRemoteRef.current = false;
-    }, 700);
-  }, []);
+  }, [beginApplyingRemote]);
+
+  const hardReloadCurrent = useCallback(() => {
+    const player = playerRef.current;
+    const snap = sessionRef.current;
+    if (!player || !snap.current_video_id) return;
+    const target = targetSecondsFromSession(snap);
+    beginApplyingRemote(1200);
+    endedHandledRef.current = false;
+    try {
+      player.mute();
+    } catch {
+      // ignore
+    }
+    try {
+      player.loadVideoById({
+        videoId: snap.current_video_id,
+        startSeconds: target,
+      });
+    } catch {
+      setPlayerEpoch((n) => n + 1);
+      return;
+    }
+    window.setTimeout(() => forcePlay(player, target), 250);
+    scheduleUnlockCheck();
+  }, [beginApplyingRemote, scheduleUnlockCheck]);
 
   useEffect(() => {
     if (!ready) return;
@@ -153,9 +208,6 @@ export function DisplayPlayer() {
       });
       if (cancelled) return;
 
-      const mount = document.getElementById(PLAYER_ELEMENT_ID);
-      if (!mount) return;
-
       if (playerRef.current) {
         try {
           playerRef.current.destroy();
@@ -164,6 +216,10 @@ export function DisplayPlayer() {
         }
         playerRef.current = null;
       }
+      readyRef.current = false;
+
+      const mount = ensureMountNode();
+      if (!mount) return;
 
       const current = sessionRef.current;
       const startSeconds = Math.max(
@@ -187,9 +243,13 @@ export function DisplayPlayer() {
         },
         events: {
           onReady: (event) => {
+            if (cancelled) return;
             readyRef.current = true;
             lastVideoIdRef.current = sessionRef.current.current_video_id;
-            applyingRemoteRef.current = true;
+            lastRemoteKeyRef.current = "";
+            stuckTicksRef.current = 0;
+            bufferingTicksRef.current = 0;
+            beginApplyingRemote(600);
             try {
               const snap = sessionRef.current;
               const seek = Math.max(
@@ -207,10 +267,18 @@ export function DisplayPlayer() {
                   });
                 }
               }
-            } finally {
-              window.setTimeout(() => {
-                applyingRemoteRef.current = false;
-              }, 600);
+            } catch {
+              // ignore
+            }
+          },
+          onError: () => {
+            // Bad video id / embed restricted / iframe hiccup — try once more,
+            // then rebuild the whole player.
+            if (stuckTicksRef.current < 1) {
+              stuckTicksRef.current = 1;
+              hardReloadCurrent();
+            } else {
+              setPlayerEpoch((n) => n + 1);
             }
           },
           onStateChange: (event: YtPlayerEvent) => {
@@ -219,10 +287,11 @@ export function DisplayPlayer() {
             if (state === YT_STATE.PLAYING) {
               setNeedsUnlock(false);
               endedHandledRef.current = false;
+              stuckTicksRef.current = 0;
+              bufferingTicksRef.current = 0;
             }
 
             // Always handle ENDED — even during remote apply.
-            // Heartbeats briefly set applyingRemoteRef and used to swallow ENDED.
             if (state === YT_STATE.ENDED) {
               if (endedHandledRef.current) return;
               endedHandledRef.current = true;
@@ -230,7 +299,7 @@ export function DisplayPlayer() {
               return;
             }
 
-            if (applyingRemoteRef.current) return;
+            if (isApplyingRemote()) return;
 
             if (state === YT_STATE.PAUSED) {
               void syncPlaybackRef.current({
@@ -244,18 +313,13 @@ export function DisplayPlayer() {
             if (state === YT_STATE.PLAYING) {
               const snap = sessionRef.current;
 
-              // A late autoplay (e.g. buffering finished after a remote pause)
-              // must not push the room back to playing.
               if (snap.playback_state === "paused") {
-                applyingRemoteRef.current = true;
+                beginApplyingRemote(500);
                 try {
                   event.target.pauseVideo();
                 } catch {
                   // ignore
                 }
-                window.setTimeout(() => {
-                  applyingRemoteRef.current = false;
-                }, 500);
                 return;
               }
 
@@ -287,7 +351,15 @@ export function DisplayPlayer() {
       }
       readyRef.current = false;
     };
-  }, [ready, scheduleUnlockCheck]);
+  }, [
+    ready,
+    playerEpoch,
+    beginApplyingRemote,
+    ensureMountNode,
+    hardReloadCurrent,
+    isApplyingRemote,
+    scheduleUnlockCheck,
+  ]);
 
   useEffect(() => {
     if (!ready || !readyRef.current || !playerRef.current) return;
@@ -310,7 +382,9 @@ export function DisplayPlayer() {
         } catch {
           current = 0;
         }
-        if (Math.abs(current - targetSec) < 2.5) {
+        // Own heartbeat ticks report the player's own position (~0 drift), so a
+        // meaningful gap here means another client seeked — apply it.
+        if (Math.abs(current - targetSec) < 1.2) {
           lastRemoteKeyRef.current = remoteKey;
           return;
         }
@@ -318,9 +392,7 @@ export function DisplayPlayer() {
     }
 
     lastRemoteKeyRef.current = remoteKey;
-
-    applyingRemoteRef.current = true;
-    // Don't clear endedHandled here on heartbeat — only when video changes below
+    beginApplyingRemote(700);
 
     const targetSec = targetSecondsFromSession(session);
 
@@ -342,6 +414,8 @@ export function DisplayPlayer() {
       if (videoChanged) {
         lastVideoIdRef.current = videoId;
         endedHandledRef.current = false;
+        stuckTicksRef.current = 0;
+        bufferingTicksRef.current = 0;
         if (session.playback_state === "playing") {
           try {
             player.mute();
@@ -378,19 +452,17 @@ export function DisplayPlayer() {
       })();
 
       if (session.playback_state === "playing") {
-        if (
-          playerState !== YT_STATE.PLAYING &&
-          playerState !== YT_STATE.BUFFERING
-        ) {
-          // Don't forcePlay over ENDED — let advance handle next track
+        if (!isLivePlayback(playerState)) {
+          // Don't forcePlay over ENDED — let advance / watchdog handle next track
           if (playerState !== YT_STATE.ENDED) {
             forcePlay(player, targetSec);
             scheduleUnlockCheck();
           }
         }
-      } else if (playerState !== YT_STATE.PAUSED && playerState !== YT_STATE.ENDED) {
-        // Includes BUFFERING/UNSTARTED — a pause issued mid-buffer used to be
-        // dropped, leaving the video playing while the room said paused.
+      } else if (
+        playerState !== YT_STATE.PAUSED &&
+        playerState !== YT_STATE.ENDED
+      ) {
         try {
           player.pauseVideo();
         } catch {
@@ -398,14 +470,14 @@ export function DisplayPlayer() {
         }
         setNeedsUnlock(false);
       }
-    } finally {
-      window.setTimeout(() => {
-        applyingRemoteRef.current = false;
-      }, 700);
+    } catch {
+      // Dead player iframe — rebuild on next watchdog / epoch bump.
+      setPlayerEpoch((n) => n + 1);
     }
   }, [
     ready,
     isHost,
+    beginApplyingRemote,
     scheduleUnlockCheck,
     session.current_video_id,
     session.playback_position_ms,
@@ -430,9 +502,9 @@ export function DisplayPlayer() {
           }
           return;
         }
-        if (applyingRemoteRef.current) return;
+        if (isApplyingRemote()) return;
         if (sessionRef.current.playback_state !== "playing") return;
-        if (state !== YT_STATE.PLAYING && state !== YT_STATE.BUFFERING) return;
+        if (!isLivePlayback(state)) return;
         void publishHostClockRef.current({
           positionMs: player.getCurrentTime() * 1000,
           durationMs: player.getDuration() * 1000,
@@ -444,7 +516,7 @@ export function DisplayPlayer() {
 
     const timer = window.setInterval(tick, HOST_HEARTBEAT_MS);
     return () => window.clearInterval(timer);
-  }, [ready, isHost, session.playback_state]);
+  }, [ready, isHost, isApplyingRemote, session.playback_state]);
 
   useEffect(() => {
     if (!ready) return;
@@ -453,7 +525,7 @@ export function DisplayPlayer() {
 
     const timer = window.setInterval(() => {
       const player = playerRef.current;
-      if (!player || !readyRef.current || applyingRemoteRef.current) return;
+      if (!player || !readyRef.current || isApplyingRemote()) return;
 
       try {
         const state = player.getPlayerState();
@@ -464,7 +536,7 @@ export function DisplayPlayer() {
           }
           return;
         }
-        if (state !== YT_STATE.PLAYING && state !== YT_STATE.BUFFERING) {
+        if (!isLivePlayback(state)) {
           const target = targetSecondsFromSession(sessionRef.current);
           forcePlay(player, target);
           scheduleUnlockCheck();
@@ -474,11 +546,8 @@ export function DisplayPlayer() {
         const target = targetSecondsFromSession(sessionRef.current);
         const current = player.getCurrentTime();
         if (Math.abs(current - target) > DRIFT_SOFT_SEC) {
-          applyingRemoteRef.current = true;
+          beginApplyingRemote(500);
           player.seekTo(target, true);
-          window.setTimeout(() => {
-            applyingRemoteRef.current = false;
-          }, 500);
         }
       } catch {
         // ignore
@@ -486,12 +555,101 @@ export function DisplayPlayer() {
     }, FOLLOWER_CORRECT_MS);
 
     return () => window.clearInterval(timer);
-  }, [ready, isHost, scheduleUnlockCheck, session.playback_state]);
+  }, [
+    ready,
+    isHost,
+    beginApplyingRemote,
+    isApplyingRemote,
+    scheduleUnlockCheck,
+    session.playback_state,
+  ]);
+
+  // Recover when the iframe goes silent while the room still says "playing".
+  // Without this the Control clock keeps walking (wall-clock estimate) and the
+  // Display stays black until a manual refresh.
+  useEffect(() => {
+    if (!ready) return;
+
+    const timer = window.setInterval(() => {
+      const snap = sessionRef.current;
+      if (!snap.current_video_id || snap.playback_state !== "playing") {
+        stuckTicksRef.current = 0;
+        bufferingTicksRef.current = 0;
+        return;
+      }
+
+      const player = playerRef.current;
+      if (!player || !readyRef.current) return;
+
+      let state: number;
+      try {
+        state = player.getPlayerState();
+      } catch {
+        setPlayerEpoch((n) => n + 1);
+        return;
+      }
+
+      if (state === YT_STATE.ENDED) {
+        if (!endedHandledRef.current) {
+          endedHandledRef.current = true;
+          onEndedRef.current();
+          stuckTicksRef.current = 0;
+          return;
+        }
+        // Advance was already requested but the player is still ENDED — ask again.
+        stuckTicksRef.current += 1;
+        if (stuckTicksRef.current >= 2) {
+          endedHandledRef.current = false;
+          onEndedRef.current();
+          stuckTicksRef.current = 0;
+        }
+        return;
+      }
+
+      if (state === YT_STATE.BUFFERING) {
+        bufferingTicksRef.current += 1;
+        // Stuck buffering for ~12s → hard reload the same video.
+        if (bufferingTicksRef.current >= 3) {
+          bufferingTicksRef.current = 0;
+          hardReloadCurrent();
+        }
+        return;
+      }
+
+      if (isLivePlayback(state)) {
+        stuckTicksRef.current = 0;
+        bufferingTicksRef.current = 0;
+        return;
+      }
+
+      // PAUSED / CUED / UNSTARTED while room expects playback.
+      stuckTicksRef.current += 1;
+      applyingRemoteUntilRef.current = 0;
+      const target = targetSecondsFromSession(snap);
+
+      if (stuckTicksRef.current === 1) {
+        forcePlay(player, target);
+        scheduleUnlockCheck();
+        return;
+      }
+
+      if (stuckTicksRef.current === 2) {
+        hardReloadCurrent();
+        return;
+      }
+
+      // Third strike: rebuild the iframe entirely.
+      stuckTicksRef.current = 0;
+      setPlayerEpoch((n) => n + 1);
+    }, WATCHDOG_MS);
+
+    return () => window.clearInterval(timer);
+  }, [ready, hardReloadCurrent, scheduleUnlockCheck]);
 
   return (
     <div className={styles.layer}>
       <div className={styles.stage}>
-        <div className={styles.playerWrap}>
+        <div className={styles.playerWrap} ref={mountRef}>
           <div id={PLAYER_ELEMENT_ID} className={styles.player} />
           {!session.current_video_id ? (
             <div className={styles.empty}>
