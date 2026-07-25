@@ -327,7 +327,7 @@ export function ControlPanel() {
 
       {showActivity ? (
         <section className={styles.activity}>
-          <h2 className={styles.queueTitle}>ใครทำอะไรบ้าง</h2>
+          <h2 className={styles.queueTitle}>ประวัติกิจกรรม</h2>
           {events.length === 0 ? (
             <p className={styles.queueEmpty}>ยังไม่มีกิจกรรมในห้องนี้</p>
           ) : (
