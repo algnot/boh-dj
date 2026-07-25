@@ -1,36 +1,44 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# โบ้ DJ
 
-## Getting Started
+ฟัง YouTube ด้วยกันผ่าน LINE — พิมพ์คำว่า **โบ้** เพื่อสร้างห้อง แล้วใช้หน้า Control (LIFF) / Display
 
-First, run the development server:
+## Features
+
+- พิมพ์ `โบ้` ในแชท LINE (กลุ่มหรือส่วนตัว) → บอทสร้างห้องและส่งลิงก์ Control แบบ LIFF
+- หน้า **Control (LIFF)**: ล็อกอินด้วย LINE แล้วคุมเล่น/หยุด, คิว, ลูป, ข้าม/ย้อน, scrub เวลา — **ไม่เล่นเสียง/วิดีโอ**
+- แสดงว่า **ใครเพิ่มเพลง / กดอะไร** ใน activity feed
+- หน้า **Display**: autoplay วิดีโอ + เสียง (sync จาก Supabase realtime)
+- ส่งลิงก์ YouTube ในแชท → บอทใส่คิวอัตโนมัติและตอบกลับ
+
+## Setup
+
+1. คัดลอก `example.env` เป็น `.env` / `.env.local` แล้วใส่ค่าจริง
+2. สร้าง Supabase project แล้วรัน:
+   - `supabase/schema.sql` (โปรเจกต์ใหม่) **หรือ**
+   - `supabase/migration-add-room-events.sql` (ถ้ามี schema เดิมแล้ว เพิ่ม activity)
+   - เปิด Realtime ให้ `room_sessions`, `room_queue`, `room_events`
+3. สร้าง LINE Messaging API channel
+   - Webhook URL: `https://<your-domain>/api/line/webhook`
+   - ใส่ `LINE_CHANNEL_SECRET` และ `LINE_CHANNEL_ACCESS_TOKEN`
+4. สร้าง **LINE Login** channel → แท็บ LIFF → Add
+   - Endpoint URL = `https://<your-domain>/liff` (สำคัญ: ต้องลงท้าย `/liff`)
+   - Size: Full / Tall
+   - Scopes: `profile`, `openid`
+   - ใส่ LIFF ID ใน `NEXT_PUBLIC_LIFF_ID`
+5. ตั้ง `NEXT_PUBLIC_APP_URL` เป็นโดเมนจริง
+6. รันแอป:
 
 ```bash
+npm install
 npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
 ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+บอทจะส่งลิงก์แบบ `https://liff.line.me/<LIFF_ID>?room=<roomId>&t=...` → เข้า `/liff` แล้วพาไปหน้า Control
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+## Usage
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
-
-## Learn More
-
-To learn more about Next.js, take a look at the following resources:
-
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
-
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
-
-## Deploy on Vercel
-
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
-
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+1. Invite บอทเข้ากลุ่ม หรือแชทส่วนตัวกับบอท
+2. พิมพ์ `โบ้`
+3. เปิดลิงก์ Control จากข้อความบอท (ใน LINE)
+4. กด **หน้า Display** บนเครื่องที่จะเปิดลำโพง/จอ
+5. ส่งลิงก์ YouTube เข้าแชทเพื่อเพิ่มคิว — ดูได้ในหน้า Control ว่าใครเพิ่มอะไร

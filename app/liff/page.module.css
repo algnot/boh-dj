@@ -1,0 +1,30 @@
+.page {
+  min-height: 100dvh;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 0.55rem;
+  padding: 2rem 1.25rem;
+  text-align: center;
+  color: #f7f1e8;
+  background:
+    radial-gradient(ellipse 70% 45% at 50% 20%, rgba(255, 122, 24, 0.14), transparent 55%),
+    #0b0c10;
+}
+
+.brand {
+  margin: 0;
+  font-family: var(--font-display), sans-serif;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: #ff7a18;
+  font-size: 1.5rem;
+}
+
+.hint {
+  margin: 0;
+  opacity: 0.7;
+  max-width: 18rem;
+  line-height: 1.5;
+}

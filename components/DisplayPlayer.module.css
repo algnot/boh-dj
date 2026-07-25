@@ -1,0 +1,126 @@
+.layer {
+  position: fixed;
+  inset: 0;
+  display: flex;
+  align-items: stretch;
+  justify-content: center;
+  background:
+    radial-gradient(ellipse 80% 60% at 20% 10%, rgba(255, 122, 24, 0.18), transparent 55%),
+    radial-gradient(ellipse 70% 50% at 90% 90%, rgba(20, 184, 166, 0.12), transparent 50%),
+    linear-gradient(160deg, #0b0c10 0%, #151821 45%, #0f1118 100%);
+}
+
+.stage {
+  position: relative;
+  width: 100%;
+  height: 100%;
+  overflow: hidden;
+}
+
+.playerWrap,
+.player {
+  width: 100%;
+  height: 100%;
+}
+
+.playerWrap {
+  position: relative;
+}
+
+.playerWrap :global(iframe) {
+  width: 100% !important;
+  height: 100% !important;
+  border: 0;
+}
+
+.empty {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 0.6rem;
+  padding: 1.5rem;
+  background:
+    linear-gradient(145deg, rgba(17, 19, 28, 0.96), rgba(28, 18, 12, 0.92));
+  color: #f4efe6;
+  text-align: center;
+  z-index: 1;
+}
+
+.emptyTitle {
+  margin: 0;
+  font-family: var(--font-display), sans-serif;
+  font-size: clamp(1.6rem, 4vw, 2.6rem);
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.emptyHint {
+  margin: 0;
+  max-width: 22rem;
+  font-size: 0.95rem;
+  opacity: 0.72;
+  line-height: 1.5;
+}
+
+.unlock {
+  position: absolute;
+  inset: 0;
+  z-index: 2;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 0.45rem;
+  border: 0;
+  padding: 1.5rem;
+  cursor: pointer;
+  background: rgba(8, 9, 14, 0.72);
+  color: #fff7ed;
+  text-align: center;
+  touch-action: manipulation;
+  backdrop-filter: blur(4px);
+}
+
+.unlockTitle {
+  font-family: var(--font-display), sans-serif;
+  font-size: clamp(1.25rem, 3vw, 2rem);
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.unlockHint {
+  font-size: 0.875rem;
+  opacity: 0.8;
+}
+
+.nowPlaying {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  z-index: 3;
+  display: flex;
+  flex-direction: column;
+  gap: 0.2rem;
+  padding: 1.1rem 1.25rem 1.35rem;
+  background: linear-gradient(transparent, rgba(8, 9, 14, 0.88));
+  color: #fff7ed;
+  pointer-events: none;
+}
+
+.nowLabel {
+  font-size: 0.7rem;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  opacity: 0.65;
+}
+
+.nowTitle {
+  font-family: var(--font-display), sans-serif;
+  font-size: clamp(1rem, 2.4vw, 1.45rem);
+  letter-spacing: 0.02em;
+  line-height: 1.25;
+}
