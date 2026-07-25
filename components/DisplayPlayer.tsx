@@ -67,6 +67,7 @@ export function DisplayPlayer() {
     isHost,
     claimHost,
     syncPlayback,
+    publishHostClock,
     onLocalVideoEnded,
   } = useRoom();
 
@@ -81,6 +82,7 @@ export function DisplayPlayer() {
   const estimatedRef = useRef(estimatedPositionMs);
   const sessionRef = useRef(session);
   const syncPlaybackRef = useRef(syncPlayback);
+  const publishHostClockRef = useRef(publishHostClock);
   const onEndedRef = useRef(onLocalVideoEnded);
   const unlockTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const isHostRef = useRef(isHost);
@@ -88,6 +90,7 @@ export function DisplayPlayer() {
   estimatedRef.current = estimatedPositionMs;
   sessionRef.current = session;
   syncPlaybackRef.current = syncPlayback;
+  publishHostClockRef.current = publishHostClock;
   onEndedRef.current = onLocalVideoEnded;
   isHostRef.current = isHost;
 
@@ -238,6 +241,22 @@ export function DisplayPlayer() {
 
             if (state === YT_STATE.PLAYING) {
               const snap = sessionRef.current;
+
+              // A late autoplay (e.g. buffering finished after a remote pause)
+              // must not push the room back to playing.
+              if (snap.playback_state === "paused") {
+                applyingRemoteRef.current = true;
+                try {
+                  event.target.pauseVideo();
+                } catch {
+                  // ignore
+                }
+                window.setTimeout(() => {
+                  applyingRemoteRef.current = false;
+                }, 500);
+                return;
+              }
+
               if (isHostRef.current || snap.playback_state !== "playing") {
                 void syncPlaybackRef.current({
                   state: "playing",
@@ -367,8 +386,14 @@ export function DisplayPlayer() {
             scheduleUnlockCheck();
           }
         }
-      } else if (playerState === YT_STATE.PLAYING) {
-        player.pauseVideo();
+      } else if (playerState !== YT_STATE.PAUSED && playerState !== YT_STATE.ENDED) {
+        // Includes BUFFERING/UNSTARTED — a pause issued mid-buffer used to be
+        // dropped, leaving the video playing while the room said paused.
+        try {
+          player.pauseVideo();
+        } catch {
+          // ignore
+        }
         setNeedsUnlock(false);
       }
     } finally {
@@ -404,12 +429,11 @@ export function DisplayPlayer() {
           return;
         }
         if (applyingRemoteRef.current) return;
+        if (sessionRef.current.playback_state !== "playing") return;
         if (state !== YT_STATE.PLAYING && state !== YT_STATE.BUFFERING) return;
-        void syncPlaybackRef.current({
-          state: "playing",
+        void publishHostClockRef.current({
           positionMs: player.getCurrentTime() * 1000,
           durationMs: player.getDuration() * 1000,
-          force: true,
         });
       } catch {
         // ignore

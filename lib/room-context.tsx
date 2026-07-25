@@ -14,6 +14,7 @@ import { getClientId } from "@/lib/client-id";
 import { logRoomEvent } from "@/lib/room-events";
 import { getSupabase } from "@/lib/supabase/client";
 import type {
+  Database,
   HistoryTrack,
   LoopMode,
   PlaybackState,
@@ -95,6 +96,21 @@ function normalizeSession(row: RoomSession): RoomSession {
   return { ...row, history: parseHistory(row.history) };
 }
 
+type SessionInsert = Database["public"]["Tables"]["room_sessions"]["Insert"];
+
+const SESSION_COLUMNS = [
+  "current_video_id",
+  "current_title",
+  "current_thumbnail_url",
+  "playback_state",
+  "playback_position_ms",
+  "playback_updated_at",
+  "duration_ms",
+  "loop_mode",
+  "host_client_id",
+  "history",
+] as const satisfies readonly (keyof RoomSession)[];
+
 type RoomContextValue = {
   ready: boolean;
   loadError: string;
@@ -123,6 +139,10 @@ type RoomContextValue = {
     positionMs: number;
     durationMs?: number;
     force?: boolean;
+  }) => Promise<void>;
+  publishHostClock: (args: {
+    positionMs: number;
+    durationMs?: number;
   }) => Promise<void>;
   onLocalVideoEnded: () => void;
 };
@@ -167,7 +187,9 @@ export function RoomProvider({
   const queueRef = useRef(queue);
   const syncingRef = useRef(false);
   const advancingRef = useRef(false);
-  const lastLocalSyncAtRef = useRef(0);
+  // updated_at instants this client wrote, so realtime echoes of our own writes
+  // can be skipped without also dropping updates from the other side.
+  const ownWritesRef = useRef<Set<number>>(new Set());
 
   sessionRef.current = session;
   queueRef.current = queue;
@@ -204,6 +226,17 @@ export function RoomProvider({
     session.playback_updated_at,
   ]);
 
+  // Postgres echoes timestamps back in its own format, so compare instants.
+  const rememberOwnWrite = useCallback((updatedAt: string) => {
+    const seen = ownWritesRef.current;
+    seen.add(Date.parse(updatedAt));
+    while (seen.size > 40) {
+      const oldest = seen.values().next().value;
+      if (oldest === undefined) break;
+      seen.delete(oldest);
+    }
+  }, []);
+
   const writeSession = useCallback(
     async (patch: Partial<RoomSession>) => {
       const supabase = getSupabase();
@@ -217,26 +250,74 @@ export function RoomProvider({
       };
 
       setSession(next);
-      lastLocalSyncAtRef.current = Date.now();
+      rememberOwnWrite(now);
 
-      const { error } = await supabase.from("room_sessions").upsert({
-        room_id: roomId,
-        current_video_id: next.current_video_id,
-        current_title: next.current_title,
-        current_thumbnail_url: next.current_thumbnail_url,
-        playback_state: next.playback_state,
-        playback_position_ms: next.playback_position_ms,
-        playback_updated_at: next.playback_updated_at,
-        duration_ms: next.duration_ms,
-        loop_mode: next.loop_mode,
-        host_client_id: next.host_client_id,
-        history: next.history,
-        updated_at: now,
-      });
+      // Only send the columns being changed. A full-row upsert would let a
+      // stale snapshot (e.g. the host heartbeat) clobber loop_mode or a pause
+      // that another client just wrote.
+      const dbPatch: SessionInsert = { room_id: roomId, updated_at: now };
+      const columns = dbPatch as Record<string, unknown>;
+      for (const column of SESSION_COLUMNS) {
+        if (column in patch) columns[column] = next[column];
+      }
+
+      const { error } = await supabase.from("room_sessions").upsert(dbPatch);
 
       if (error) throw error;
     },
-    [roomId],
+    [rememberOwnWrite, roomId],
+  );
+
+  // The host publishes its clock every few seconds. It must never resurrect
+  // playback that someone paused in the meantime, so the write is conditional
+  // on the room still being in the playing state.
+  const publishHostClock = useCallback(
+    async (args: { positionMs: number; durationMs?: number }) => {
+      const supabase = getSupabase();
+      const now = new Date().toISOString();
+      const positionMs = Math.max(0, Math.round(args.positionMs));
+      const durationMs =
+        args.durationMs != null
+          ? Math.max(0, Math.round(args.durationMs))
+          : sessionRef.current.duration_ms;
+
+      rememberOwnWrite(now);
+      setSession((prev) => ({
+        ...prev,
+        playback_position_ms: positionMs,
+        playback_updated_at: now,
+        duration_ms: durationMs,
+        updated_at: now,
+      }));
+
+      const { data, error } = await supabase
+        .from("room_sessions")
+        .update({
+          playback_position_ms: positionMs,
+          playback_updated_at: now,
+          duration_ms: durationMs,
+          updated_at: now,
+        })
+        .eq("room_id", roomId)
+        .eq("playback_state", "playing")
+        .select("*")
+        .maybeSingle();
+
+      if (error) throw error;
+      if (data) return;
+
+      // The room is no longer playing: adopt the authoritative row so the
+      // player stops instead of fighting the pause.
+      const fresh = await supabase
+        .from("room_sessions")
+        .select("*")
+        .eq("room_id", roomId)
+        .maybeSingle();
+      if (fresh.data) {
+        setSession(normalizeSession(fresh.data as RoomSession));
+      }
+    },
+    [rememberOwnWrite, roomId],
   );
 
   const recordEvent = useCallback(
@@ -815,10 +896,15 @@ export function RoomProvider({
           filter: `room_id=eq.${roomId}`,
         },
         (payload) => {
-          if (Date.now() - lastLocalSyncAtRef.current < 400) return;
           if (payload.eventType === "DELETE") return;
           const row = payload.new as RoomSession;
           if (!row?.room_id) return;
+          if (
+            row.updated_at &&
+            ownWritesRef.current.has(Date.parse(row.updated_at))
+          ) {
+            return;
+          }
           setSession(normalizeSession(row));
         },
       )
@@ -905,6 +991,7 @@ export function RoomProvider({
       playQueueItem,
       addToQueue,
       syncPlayback,
+      publishHostClock,
       onLocalVideoEnded,
     }),
     [
@@ -931,6 +1018,7 @@ export function RoomProvider({
       playQueueItem,
       addToQueue,
       syncPlayback,
+      publishHostClock,
       onLocalVideoEnded,
     ],
   );

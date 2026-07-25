@@ -1,6 +1,7 @@
 import { randomBytes } from "crypto";
 import { getSupabase } from "@/lib/supabase/client";
 import type {
+  Database,
   HistoryTrack,
   LineSourceType,
   LoopMode,
@@ -184,6 +185,21 @@ export async function getSession(roomId: string) {
   return normalizeSession(data as RoomSession);
 }
 
+type SessionInsert = Database["public"]["Tables"]["room_sessions"]["Insert"];
+
+const SESSION_COLUMNS = [
+  "current_video_id",
+  "current_title",
+  "current_thumbnail_url",
+  "playback_state",
+  "playback_position_ms",
+  "playback_updated_at",
+  "duration_ms",
+  "loop_mode",
+  "host_client_id",
+  "history",
+] as const satisfies readonly (keyof RoomSession)[];
+
 async function writeSession(roomId: string, patch: Partial<RoomSession>) {
   const supabase = getSupabase();
   const current = await getSession(roomId);
@@ -196,20 +212,15 @@ async function writeSession(roomId: string, patch: Partial<RoomSession>) {
     updated_at: now,
   };
 
-  const { error } = await supabase.from("room_sessions").upsert({
-    room_id: next.room_id,
-    current_video_id: next.current_video_id,
-    current_title: next.current_title,
-    current_thumbnail_url: next.current_thumbnail_url,
-    playback_state: next.playback_state,
-    playback_position_ms: next.playback_position_ms,
-    playback_updated_at: next.playback_updated_at,
-    duration_ms: next.duration_ms,
-    loop_mode: next.loop_mode,
-    host_client_id: next.host_client_id,
-    history: next.history,
-    updated_at: now,
-  });
+  // Only write the changed columns so a concurrent control action (loop mode,
+  // pause) isn't reverted by this snapshot.
+  const dbPatch: SessionInsert = { room_id: roomId, updated_at: now };
+  const columns = dbPatch as Record<string, unknown>;
+  for (const column of SESSION_COLUMNS) {
+    if (column in patch) columns[column] = next[column];
+  }
+
+  const { error } = await supabase.from("room_sessions").upsert(dbPatch);
 
   if (error) throw error;
   return next;
